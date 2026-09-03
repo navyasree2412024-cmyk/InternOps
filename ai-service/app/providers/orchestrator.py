@@ -106,15 +106,13 @@ class AIOrchestrator:
     - Uses PRIMARY_AI_PROVIDER and ACTIVE_FALLBACK_PROVIDERS
     """
 
-    async def generate_text(
+    async def generate_chat(
         self,
-        prompt: str,
+        messages: list[dict],
         temperature: float = 0.7,
         **kwargs,
     ) -> str:
-        content, _ = await self.generate_text_with_fallback(
-            prompt, temperature=temperature, **kwargs
-        )
+        content, _ = await self.generate_chat_with_fallback(messages, temperature=temperature, **kwargs)
         return content
 
     async def generate_json(
@@ -129,19 +127,47 @@ class AIOrchestrator:
         )
         return data
 
+    async def generate_image(
+        self,
+        prompt: str,
+        **kwargs,
+    ) -> str:
+        data, _ = await self.generate_image_with_fallback(prompt, **kwargs)
+        return data
+
+    async def generate_image_with_fallback(
+        self,
+        prompt: str,
+        **kwargs,
+    ) -> Tuple[str, str]:
+        return await self._execute_with_failover(
+            "generate_image", prompt, **kwargs
+        )
+
     async def generate_text_with_fallback(
         self,
         prompt: str,
         temperature: float = 0.7,
         **kwargs,
     ) -> Tuple[str, str]:
-        """
-        Attempts to generate text by calling the primary provider first,
-        and falling back to active secondary providers if failures occur.
-        Returns (generated_text, successful_provider_name).
-        """
         return await self._execute_with_failover(
-            "generate_text", prompt, temperature=temperature, **kwargs
+            "generate_text",
+            prompt,
+            temperature=temperature,
+            **kwargs,
+        )
+
+    async def generate_chat_with_fallback(
+        self,
+        messages: list[dict],
+        temperature: float = 0.7,
+        **kwargs,
+    ) -> Tuple[str, str]:
+        return await self._execute_with_failover(
+            "generate_chat",
+            messages,
+            temperature=temperature,
+            **kwargs
         )
 
     async def generate_json_with_fallback(
@@ -224,7 +250,15 @@ class AIOrchestrator:
 
             # 2. Call Provider on Cache Miss
             try:
-                func = getattr(provider, method_name)
+                func = getattr(provider, method_name, None)
+                if func is None:
+                    errors.append(
+                        {
+                            "provider": provider_name,
+                            "reason": f"{method_name} not supported by this provider",
+                        }
+                    )
+                    continue
                 result = await func(*args, **kwargs)
                 await cb.record_success()
 

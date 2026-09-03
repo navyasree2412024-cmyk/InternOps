@@ -13,6 +13,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "matplotlib>=3.11.1",
     "reportlab>=5.0.1",
+    "PyJWT>=2.8.0",
 ]
 
 [dependency-groups]
@@ -20,4 +21,12 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "respx>=0.23.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+filterwarnings = [
+    "ignore:.*httpx.*starlette.testclient.*:DeprecationWarning",
+    "ignore:.*httpx.*starlette.testclient.*:Warning",
+    "ignore:Fallback provider.*lacks a valid API key.*:RuntimeWarning"
 ]

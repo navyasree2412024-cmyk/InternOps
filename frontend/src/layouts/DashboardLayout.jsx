@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   Users,
   CalendarCheck,
+  BriefcaseBusiness,
   Star,
   Target,
   Video,
@@ -26,22 +27,29 @@ import {
   Zap,
   ToggleRight,
   GitPullRequest,
+  Menu,
+  X,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
+import { resolveUploadUrl } from '../lib/uploadUrl';
 import { connectSocket, disconnectSocket } from '../lib/socket';
 import { UserAvatar, ConfirmationModal } from '../components/ui';
 import useAuthStore from '../store/auth';
 import useFeatureFlagsStore from '../store/featureFlags';
 import { QUERY_KEYS } from '../constants/queryKeys';
 import { ROLE_LABEL } from '../constants/roles';
+import FloatingChatbot from '../components/FloatingChatbot';
 
 const MANAGER_ROLES = ['ADMIN', 'SENIOR_TL', 'TL', 'CAPTAIN'];
 const ADMIN_AND_SENIOR_TL_ROLES = ['ADMIN', 'SENIOR_TL'];
 const ADMIN_ONLY_ROLES = ['ADMIN'];
+const DIRECTORY_ROLES = ['ADMIN', 'SENIOR_TL', 'TL'];
 
 const nav = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -50,6 +58,19 @@ const nav = [
     label: 'My Team',
     icon: Users,
     allowedRoles: MANAGER_ROLES,
+  },
+  {
+    path: '/analytics',
+    label: 'Analytics',
+    icon: BarChart2,
+    allowedRoles: ADMIN_AND_SENIOR_TL_ROLES,
+    featureFlag: 'ADVANCED_ANALYTICS',
+  },
+  {
+    path: '/hr',
+    label: 'HR',
+    icon: BriefcaseBusiness,
+    allowedRoles: ADMIN_ONLY_ROLES,
   },
   {
     path: '/attendance',
@@ -74,17 +95,22 @@ const nav = [
   { path: '/profile', label: 'Profile', icon: User },
   { path: '/sessions', label: 'Sessions', icon: Shield },
   {
+    path: '/internops',
+    label: 'InternOps',
+    icon: Building,
+    allowedRoles: ADMIN_AND_SENIOR_TL_ROLES,
+  },
+  {
     path: '/reports',
     label: 'Reports',
     icon: FileText,
     allowedRoles: ADMIN_AND_SENIOR_TL_ROLES,
   },
   {
-    path: '/analytics',
-    label: 'Analytics',
-    icon: BarChart2,
+    path: '/report-templates',
+    label: 'Report Templates',
+    icon: FileText,
     allowedRoles: ADMIN_AND_SENIOR_TL_ROLES,
-    featureFlag: 'ADVANCED_ANALYTICS',
   },
   {
     path: '/exports',
@@ -105,13 +131,13 @@ const adminNav = [
     path: '/admin',
     label: 'Users',
     icon: Settings,
-    allowedRoles: ADMIN_ONLY_ROLES,
+    allowedRoles: DIRECTORY_ROLES,
   },
   {
     path: '/departments',
     label: 'Departments',
     icon: Building,
-    allowedRoles: ADMIN_ONLY_ROLES,
+    allowedRoles: DIRECTORY_ROLES,
   },
   {
     path: '/audit',
@@ -222,11 +248,34 @@ export default function DashboardLayout() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const accessToken = useAuthStore((s) => s.accessToken);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (accessToken) connectSocket(accessToken);
-    return () => disconnectSocket();
-  }, [accessToken]);
+    if (!accessToken || user?.mustChangePassword) return undefined;
+
+    const socket = connectSocket(accessToken);
+
+    const handleNotificationReceived = (payload) => {
+      if (typeof payload?.unreadCount === 'number') {
+        queryClient.setQueryData(['notifications', 'unread-count'], {
+          unread: payload.unreadCount,
+        });
+      }
+
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          query.queryKey[0] === 'notifications' &&
+          query.queryKey[1] !== 'unread-count',
+      });
+    };
+
+    socket?.on('notification-received', handleNotificationReceived);
+
+    return () => {
+      socket?.off('notification-received', handleNotificationReceived);
+      disconnectSocket();
+    };
+  }, [accessToken, queryClient, user?.mustChangePassword]);
 
   const role = user?.role;
   const flags = useFeatureFlagsStore((s) => s.flags);
@@ -240,14 +289,49 @@ export default function DashboardLayout() {
     () => localStorage.getItem('theme') === 'dark'
   );
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const { data: me } = useQuery({
     queryKey: QUERY_KEYS.USER_PROFILE,
     queryFn: () => api.get('/users/me').then((r) => r.data),
   });
+  const isDepartmentScopedRole = ['SENIOR_TL', 'TL'].includes(role);
+  const { data: scopedDepartments = [] } = useQuery({
+    queryKey: ['departments', 'sidebar', role],
+    queryFn: () => api.get('/departments').then((r) => r.data || []),
+    enabled: isDepartmentScopedRole && !user?.mustChangePassword,
+  });
+  const assignedDepartment = scopedDepartments[0] || null;
+  const departmentLabelStorageKey = user?.id
+    ? `sidebar-department-label:${user.id}`
+    : null;
+  const storedDepartmentLabel = departmentLabelStorageKey
+    ? localStorage.getItem(departmentLabelStorageKey)
+    : null;
+
+  useEffect(() => {
+    if (departmentLabelStorageKey && assignedDepartment?.name) {
+      localStorage.setItem(
+        departmentLabelStorageKey,
+        `${assignedDepartment.name} Department`
+      );
+    }
+  }, [assignedDepartment?.name, departmentLabelStorageKey]);
+
+  const { data: unreadData } = useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: () => api.get('/notifications/unread-count').then((r) => r.data),
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+    enabled: !!user && !user?.mustChangePassword,
+  });
+
+  const unreadCount = unreadData?.unread || 0;
 
   const displayName = me?.full_name || user?.fullName || user?.email;
-  const avatarUrl = me?.avatar_url || null;
+  const avatarUrl = resolveUploadUrl(
+    me?.avatar_url || (role === 'ADMIN' ? '/admin-default-avatar.svg' : null)
+  );
 
   useEffect(() => {
     localStorage.setItem('sidebar', collapsed ? 'collapsed' : 'open');
@@ -264,15 +348,75 @@ export default function DashboardLayout() {
   );
 
   const visibleAdminNav = useMemo(
-    () => adminNav.filter((item) => canShowNavItem(item, role, flags)),
-    [role, flags]
+    () =>
+      adminNav
+        .filter((item) => canShowNavItem(item, role, flags))
+        .map((item) => {
+          if (item.path !== '/departments' || !isDepartmentScopedRole) {
+            return item;
+          }
+
+          return {
+            ...item,
+            path: assignedDepartment?.id
+              ? `/departments/${assignedDepartment.id}/projects`
+              : '/departments',
+            label: assignedDepartment?.name
+              ? `${assignedDepartment.name} Department`
+              : storedDepartmentLabel || 'Department',
+          };
+        }),
+    [
+      assignedDepartment,
+      flags,
+      isDepartmentScopedRole,
+      role,
+      storedDepartmentLabel,
+    ]
   );
 
   const allItems = [...visibleNav, ...visibleAdminNav];
 
-  const current = allItems.find((n) => n.path === loc.pathname) || {
-    label: 'Dashboard',
-  };
+  const isProjectDetailRoute = /^\/departments\/[^/]+\/projects\/[^/]+$/.test(
+    loc.pathname
+  );
+  const departmentProjectsMatch = loc.pathname.match(
+    /^\/departments\/([^/]+)\/projects$/
+  );
+  const current = (() => {
+    if (isProjectDetailRoute) return { label: 'Project Detail' };
+
+    if (departmentProjectsMatch) {
+      return {
+        label:
+          allItems.find(
+            (item) =>
+              item.path ===
+              `/departments/${departmentProjectsMatch[1]}/projects`
+          )?.label || 'Department',
+      };
+    }
+
+    const nestedDepartmentPageMatch = loc.pathname.match(
+      /^\/admin\/departments\/[^/]+\/(attendance|ratings|tasks)$/
+    );
+
+    if (nestedDepartmentPageMatch) {
+      return {
+        label:
+          nestedDepartmentPageMatch[1].charAt(0).toUpperCase() +
+          nestedDepartmentPageMatch[1].slice(1),
+      };
+    }
+
+    return (
+      allItems.find(
+        (n) =>
+          n.path === loc.pathname ||
+          (n.path !== '/' && loc.pathname.startsWith(`${n.path}/`))
+      ) || { label: 'Dashboard' }
+    );
+  })();
 
   useEffect(() => {
     const savedScroll = Number(sessionStorage.getItem(SIDEBAR_KEY) || 0);
@@ -291,6 +435,7 @@ export default function DashboardLayout() {
         String(sidebarNavRef.current.scrollTop)
       );
     }
+    setMobileOpen(false);
   }, []);
 
   const handleLogout = () => {
@@ -300,10 +445,25 @@ export default function DashboardLayout() {
 
   return (
     <div className="flex h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/60 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 text-slate-900 dark:text-white">
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
       <aside
-        className={`${
-          collapsed ? 'w-20' : 'w-64'
-        } shrink-0 bg-gradient-to-b from-indigo-700 via-indigo-800 to-violet-950 text-white flex flex-col transition-all duration-300 ease-in-out shadow-2xl shadow-indigo-950/20`}
+        className={`
+          fixed inset-y-0 left-0 z-50 flex flex-col
+          bg-gradient-to-b from-indigo-700 via-indigo-800 to-violet-950
+          text-white shadow-2xl shadow-indigo-950/20
+          transition-all duration-300 ease-in-out
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
+          md:relative md:translate-x-0 md:inset-auto md:z-auto
+          ${collapsed ? 'w-20' : 'w-64'}
+          shrink-0
+        `}
       >
         <div
           className={`p-5 flex items-center ${collapsed ? 'justify-center' : 'justify-start'}`}
@@ -344,14 +504,16 @@ export default function DashboardLayout() {
             <>
               {!collapsed && (
                 <p className="px-3 pt-5 pb-1.5 text-[11px] uppercase tracking-[0.18em] text-indigo-300/90 font-extrabold">
-                  Admin
+                  {role === 'ADMIN' ? 'ADMIN' : 'MANAGEMENT'}
                 </p>
               )}
               {collapsed && (
                 <div className="my-3 mx-3 border-t border-white/10" />
               )}
               {visibleAdminNav.map((n) => {
-                const isDeptNav = n.path === '/departments';
+                const isDeptNav =
+                  n.path === '/departments' ||
+                  /^\/departments\/[^/]+\/projects$/.test(n.path);
                 const deptMatch = loc.pathname.match(
                   /\/(?:admin\/)?departments\/([^/]+)/
                 );
@@ -361,7 +523,13 @@ export default function DashboardLayout() {
                   <div key={n.path} className="space-y-1">
                     <NavLink
                       n={n}
-                      active={loc.pathname === n.path}
+                      active={
+                        loc.pathname === n.path ||
+                        (isDeptNav &&
+                          /^\/(?:admin\/)?departments\/[^/]+/.test(
+                            loc.pathname
+                          ))
+                      }
                       collapsed={collapsed}
                       onLinkClick={saveSidebarScroll}
                     />
@@ -456,16 +624,39 @@ export default function DashboardLayout() {
             )}
           </div>
         </div>
+        {/* Mobile close button */}
+        <button
+          className="absolute top-4 right-4 md:hidden w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Close sidebar"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </aside>
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-4 sm:px-6 shrink-0 shadow-sm dark:shadow-none">
           <div className="flex items-center gap-3">
+            {/* Mobile hamburger */}
+            <button
+              className="md:hidden w-10 h-10 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 transition"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open sidebar"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            {/* Desktop collapse toggle */}
             <button
               onClick={() => setCollapsed((c) => !c)}
-              className="w-10 h-10 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 transition font-extrabold"
+              className="hidden md:flex w-10 h-10 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800 items-center justify-center text-slate-600 dark:text-slate-300 transition font-extrabold"
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
-              {collapsed ? '»' : '«'}
+              {collapsed ? (
+                <PanelLeftOpen className="w-5 h-5" />
+              ) : (
+                <PanelLeftClose className="w-5 h-5" />
+              )}
             </button>
             <div className="hidden sm:block">
               <p className="text-xs text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
@@ -490,9 +681,22 @@ export default function DashboardLayout() {
             <Link
               to="/notifications"
               onClick={saveSidebarScroll}
+              aria-label={
+                unreadCount > 0
+                  ? `Notifications (${unreadCount} unread)`
+                  : 'Notifications'
+              }
+              title="Notifications"
               className="w-10 h-10 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition"
             >
-              <Bell className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              <div className="relative">
+                <Bell className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-[16px] px-1 items-center justify-center text-[9px] font-extrabold text-white bg-red-500 rounded-full border border-white dark:border-slate-900 select-none">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </div>
             </Link>
             <Link
               to="/profile"
@@ -522,6 +726,7 @@ export default function DashboardLayout() {
         onCancel={() => setShowLogoutConfirm(false)}
         danger={true}
       />
+      {loc.pathname !== '/profile' && <FloatingChatbot />}
     </div>
   );
 }

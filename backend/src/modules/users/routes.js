@@ -9,10 +9,66 @@ const argon2 = require('argon2');
 const { z } = require('zod');
 const authRepo = require('../auth/repository');
 const { toSchema } = require('../../utils/schemaHelper');
+const { isValidStep, checkHierarchyAccess } = require('../../utils/hierarchy');
+
+const SENIOR_TL_MANAGEABLE_ROLES = new Set(['TL', 'CAPTAIN', 'INTERN']);
+const TL_MANAGEABLE_ROLES = new Set(['CAPTAIN', 'INTERN']);
+
+async function authorizeUserManagement(req, reply, targetUser, action) {
+  if (req.user.role === 'ADMIN') return true;
+
+  if (req.user.role === 'SENIOR_TL') {
+    const allowed =
+      req.user.id !== targetUser.id &&
+      req.user.departmentId &&
+      targetUser.department_id === req.user.departmentId &&
+      SENIOR_TL_MANAGEABLE_ROLES.has(targetUser.role);
+    if (!allowed) {
+      reply.status(403).send({ error: `Senior TL cannot ${action} this user` });
+      return false;
+    }
+    return true;
+  }
+
+  if (req.user.role === 'TL') {
+    // TL can only manage CAPTAIN and INTERN
+    if (!TL_MANAGEABLE_ROLES.has(targetUser.role)) {
+      reply.status(403).send({
+        error: `TL can only ${action} Captains and Interns`,
+      });
+      return false;
+    }
+
+    // TL cannot manage self
+    if (req.user.id === targetUser.id) {
+      reply.status(403).send({
+        error: `You cannot ${action} your own account`,
+      });
+      return false;
+    }
+
+    // TL must have hierarchy access
+    const ok = await checkHierarchyAccess(req.user.id, targetUser.id);
+    if (!ok) {
+      reply.status(403).send({
+        error: `TL cannot ${action} this user`,
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  reply.status(403).send({ error: `Cannot ${action} this user` });
+  return false;
+}
 
 const listUsersQuerySchema = z.object({
   search: z.string().trim().max(100).optional(),
   role: z.enum(['ADMIN', 'SENIOR_TL', 'TL', 'CAPTAIN', 'INTERN']).optional(),
+  department_id: z
+    .union([z.string().uuid(), z.literal('unassigned')])
+    .optional(),
   suspended: z
     .enum(['true', 'false'])
     .transform((value) => value === 'true')
@@ -25,6 +81,29 @@ const listUsersQuerySchema = z.object({
     .default('created_at'),
   sortOrder: z.enum(['asc', 'desc']).optional().default('asc'),
 });
+
+const USER_ROLES = [
+  'ADMIN',
+  'MANAGEMENT',
+  'HR',
+  'SENIOR_TL',
+  'TL',
+  'CAPTAIN',
+  'INTERN',
+];
+
+const updateUserSchema = z
+  .object({
+    full_name: z.string().trim().min(1).max(255).optional(),
+    email: z.string().trim().email().max(255).optional(),
+    role: z.enum(USER_ROLES).optional(),
+    department_id: z.string().uuid().nullable().optional(),
+    manager_id: z.string().uuid().nullable().optional(),
+  })
+  .strict()
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'At least one editable field is required',
+  });
 
 const allowedAvatarExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
 
