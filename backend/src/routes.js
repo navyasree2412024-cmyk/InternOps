@@ -4,6 +4,7 @@
 // IMPORTS - All route imports at the top
 // =============================================
 const userRoutes = require('./modules/users/routes');
+const noticesRoutes = require('./modules/notices/routes');
 // const authRoutes = require('./modules/auth/routes');
 // const teamRoutes = require('./modules/team/routes');
 // const taskRoutes = require('./modules/tasks/routes');
