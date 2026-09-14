@@ -596,6 +596,7 @@ export default function Profile() {
                 type="password"
                 name="current-password"
                 autoComplete="section-security current-password"
+                maxLength={128}
                 value={oldPassword}
                 onChange={(event) => setOldPassword(event.target.value)}
                 placeholder="Enter current password"

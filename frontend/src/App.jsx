@@ -5,19 +5,17 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router-dom';
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import DashboardLayout from './layouts/DashboardLayout';
 import useAuthStore from './store/auth';
 import useFeatureFlagsStore from './store/featureFlags';
 import { refreshSession } from './lib/axios';
-import RoleGuard from './components/RoleGuard';
 import ErrorBoundary from './components/ErrorBoundary';
-const HR = lazy(() => import('./pages/HR'));
+import RoleGuard from './components/RoleGuard';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import RouteRefreshSkeleton from './components/loading/RouteRefreshSkeleton';
 
-// Lazy load page components
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Tasks = lazy(() => import('./pages/Tasks'));
@@ -25,41 +23,29 @@ const Attendance = lazy(() => import('./pages/Attendance'));
 const Ratings = lazy(() => import('./pages/Ratings'));
 const Team = lazy(() => import('./pages/Team'));
 const Profile = lazy(() => import('./pages/Profile'));
+const Requests = lazy(() => import('./pages/Requests'));
 const Sessions = lazy(() => import('./pages/Sessions'));
 const Meetings = lazy(() => import('./pages/Meetings'));
 const Notifications = lazy(() => import('./pages/Notifications'));
+
 const InternOpsAssistant = lazy(
   () => import('./components/InternOpsAssistant')
 );
+
 const PerformanceIntelligence = lazy(
   () => import('./pages/PerformanceIntelligence')
 );
-const InternOps = lazy(() => import('./pages/InternOps'));
-const Reports = lazy(() => import('./pages/admin/Reports'));
-const ReportTemplates = lazy(() => import('./pages/admin/ReportTemplates'));
-const Analytics = lazy(() => import('./pages/admin/Analytics'));
-const Exports = lazy(() => import('./pages/admin/Exports'));
-const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
-const Departments = lazy(() => import('./pages/admin/Departments'));
-const AuditLog = lazy(() => import('./pages/admin/AuditLog'));
-const Notices = lazy(() => import('./pages/admin/Notices'));
-const Certificates = lazy(() => import('./pages/admin/Certificates'));
-const BulkGenerate = lazy(() => import('./pages/admin/BulkGenerate'));
-const CanvaTemplates = lazy(() => import('./pages/admin/CanvaTemplates'));
-const CanvaCallback = lazy(() => import('./pages/admin/CanvaCallback'));
-const AICertificates = lazy(() => import('./pages/admin/AICertificates'));
-const QuickGenerate = lazy(() => import('./pages/admin/QuickGenerate'));
-const FeatureFlags = lazy(() => import('./pages/admin/FeatureFlags'));
-const GithubSync = lazy(() => import('./pages/admin/GithubSync'));
-const ProjectsPage = lazy(() => import('./pages/admin/ProjectsPage'));
-const ProjectDetailPage = lazy(() => import('./pages/admin/ProjectDetailPage'));
-const TaskDetails = lazy(() => import('./pages/admin/TaskDetails'));
+
+const HR = lazy(() => import('./pages/HR'));
+
+const PrivilegedRoutes = lazy(() => import('./PrivilegedRoutes'));
 
 function PageLoader() {
   return <RouteRefreshSkeleton />;
 }
+
 function PublicLazyPage({ children }) {
-  return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
+  return <Suspense fallback={null}>{children}</Suspense>;
 }
 
 let bootRefreshPromise = null;
@@ -74,9 +60,11 @@ function Private({ children }) {
   if (!hydrated) {
     return user ? children : null;
   }
+
   if (!token) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
+
   if (
     user?.mustChangePassword &&
     !impersonation &&
@@ -88,6 +76,22 @@ function Private({ children }) {
   return children;
 }
 
+function PrivilegedRouteGate() {
+  const user = useAuthStore((s) => s.user);
+
+  const privilegedRoles = ['ADMIN', 'SENIOR_TL', 'TL', 'HR'];
+
+  if (!privilegedRoles.includes(user?.role)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <PrivilegedRoutes />
+    </Suspense>
+  );
+}
+
 export default function App() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -95,6 +99,7 @@ export default function App() {
   const logout = useAuthStore((s) => s.logout);
   const setSystemError = useAuthStore((s) => s.setSystemError);
   const systemError = useAuthStore((s) => s.systemError);
+  const [retryAfterSeconds, setRetryAfterSeconds] = useState(0);
   const hydrated = useAuthStore((s) => s.hydrated);
   const fetchFlags = useFeatureFlagsStore((s) => s.fetchFlags);
   const resetFlags = useFeatureFlagsStore((s) => s.reset);
@@ -106,6 +111,7 @@ export default function App() {
     };
 
     window.addEventListener('auth:logout', handleForceLogout);
+
     return () => window.removeEventListener('auth:logout', handleForceLogout);
   }, [logout, navigate]);
 
@@ -113,15 +119,12 @@ export default function App() {
     if (!bootRefreshPromise) {
       bootRefreshPromise = refreshSession().then(
         async ({ user: refreshedUser }) => {
-          // Feature flags are protected resources. Temporary-password accounts
-          // may access only Profile until the required password change succeeds.
           if (refreshedUser?.mustChangePassword) {
             resetFlags();
           } else {
-            Promise.resolve(fetchFlags()).catch(() => {
-              // Feature flags use their own safe defaults and must not block boot.
-            });
+            Promise.resolve(fetchFlags()).catch(() => {});
           }
+
           return refreshedUser;
         }
       );
@@ -138,6 +141,21 @@ export default function App() {
             logout();
             resetFlags();
           }
+        } else if (status === 429) {
+          const retryAfterHeader = Number(
+            err.response?.headers?.['retry-after']
+          );
+
+          const retryAfter =
+            Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+              ? Math.ceil(retryAfterHeader)
+              : 10;
+
+          setRetryAfterSeconds(retryAfter);
+
+          setSystemError(
+            `Too many requests. Please retry in ${retryAfter} seconds.`
+          );
         } else {
           setSystemError(
             'Service temporarily unavailable. Please try again later.'
@@ -148,6 +166,28 @@ export default function App() {
         setHydrated();
       });
   }, [logout, setAuth, setHydrated, setSystemError, fetchFlags, resetFlags]);
+
+  useEffect(() => {
+    if (!systemError || retryAfterSeconds <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setRetryAfterSeconds((seconds) => {
+        const next = Math.max(0, seconds - 1);
+
+        if (next > 0) {
+          setSystemError(`Too many requests. Please retry in ${next} seconds.`);
+        } else {
+          setSystemError('You can retry now.');
+        }
+
+        return next;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [retryAfterSeconds > 0, setSystemError, systemError]);
 
   if (systemError) {
     return (
@@ -161,18 +201,32 @@ export default function App() {
           gap: '12px',
         }}
       >
-        <p style={{ fontSize: '1.1rem', color: '#b91c1c', fontWeight: 600 }}>
+        <p
+          style={{
+            fontSize: '1.1rem',
+            color: '#b91c1c',
+            fontWeight: 600,
+          }}
+        >
           {systemError}
         </p>
+
         <button
           onClick={() => {
+            if (retryAfterSeconds > 0) return;
+
             useAuthStore.getState().setSystemError(null);
             bootRefreshPromise = null;
             window.location.reload();
           }}
-          style={{ padding: '8px 20px', cursor: 'pointer' }}
+          disabled={retryAfterSeconds > 0}
+          style={{
+            padding: '8px 20px',
+            cursor: retryAfterSeconds > 0 ? 'not-allowed' : 'pointer',
+            opacity: retryAfterSeconds > 0 ? 0.6 : 1,
+          }}
         >
-          Retry
+          {retryAfterSeconds > 0 ? `Retry in ${retryAfterSeconds}s` : 'Retry'}
         </button>
       </div>
     );
@@ -181,7 +235,6 @@ export default function App() {
   if (!hydrated && !useAuthStore.getState().user) {
     return (
       <div className="relative min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-50 via-indigo-50 to-blue-50 dark:from-slate-950 dark:via-indigo-950 dark:to-blue-950 text-slate-800 dark:text-white overflow-hidden animate-fade-in">
-        {/* Background Decor Grid */}
         <div className="absolute inset-0 opacity-[0.4] dark:opacity-[0.2] pointer-events-none">
           <svg
             className="w-full h-full stroke-slate-900/[0.06] dark:stroke-white/[0.05]"
@@ -202,14 +255,16 @@ export default function App() {
                 />
               </pattern>
             </defs>
+
             <rect width="100%" height="100%" fill="url(#grid-pattern)" />
           </svg>
         </div>
+
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-400/10 dark:bg-indigo-500/10 rounded-full blur-3xl" />
+
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-400/10 dark:bg-blue-500/10 rounded-full blur-3xl" />
 
         <div className="relative flex flex-col items-center max-w-sm px-6 text-center">
-          {/* Logo container */}
           <div className="inline-flex items-center justify-center rounded-3xl bg-white/40 dark:bg-white/[0.04] border border-slate-200/50 dark:border-white/10 px-6 py-4 shadow-xl dark:shadow-2xl backdrop-blur-xl mb-6 animate-pulse">
             <img
               src="/UptoSkills.webp"
@@ -218,15 +273,14 @@ export default function App() {
             />
           </div>
 
-          {/* Title and details */}
           <h1 className="text-3xl font-extrabold tracking-tight text-slate-800 dark:text-white mb-1">
             InternOps
           </h1>
+
           <p className="text-slate-500 dark:text-white/60 text-xs tracking-wider uppercase mb-8">
             Workforce &amp; Intern Management Platform
           </p>
 
-          {/* Premium Loading Spinner */}
           <div
             className="h-12 w-12 animate-spin rounded-full border-4 border-slate-300 border-t-indigo-600 dark:border-slate-700 dark:border-t-indigo-400"
             role="status"
@@ -241,6 +295,7 @@ export default function App() {
     <ErrorBoundary>
       <Routes>
         <Route path="/login" element={<Login />} />
+
         <Route
           path="/forgot-password"
           element={
@@ -249,6 +304,7 @@ export default function App() {
             </PublicLazyPage>
           }
         />
+
         <Route
           path="/reset-password"
           element={
@@ -258,7 +314,6 @@ export default function App() {
           }
         />
 
-        {/* SINGLE LAYOUT WRAPPER FOR ALL AUTHENTICATED PAGES */}
         <Route
           path="/"
           element={
@@ -269,29 +324,25 @@ export default function App() {
         >
           <Route index element={<Navigate to="dashboard" replace />} />
 
+          {/* Common authenticated routes */}
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="tasks" element={<Tasks />} />
-          <Route
-            path="tasks/:taskId"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL']}>
-                <TaskDetails />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="admin/tasks/:taskId"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL']}>
-                <TaskDetails />
-              </RoleGuard>
-            }
-          />
           <Route path="attendance" element={<Attendance />} />
           <Route path="ratings" element={<Ratings />} />
           <Route path="meetings" element={<Meetings />} />
           <Route path="team" element={<Team />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="requests" element={<Requests />} />
+          <Route path="sessions" element={<Sessions />} />
+          <Route path="notifications" element={<Notifications />} />
+          <Route path="assistant" element={<InternOpsAssistant />} />
 
+          <Route
+            path="performance-intelligence"
+            element={<PerformanceIntelligence />}
+          />
+
+          {/* HR remains here for the existing routing contract */}
           <Route
             path="hr"
             element={
@@ -301,197 +352,8 @@ export default function App() {
             }
           />
 
-          <Route path="profile" element={<Profile />} />
-          <Route path="sessions" element={<Sessions />} />
-          <Route path="notifications" element={<Notifications />} />
-          <Route path="assistant" element={<InternOpsAssistant />} />
-
-          <Route
-            path="performance-intelligence"
-            element={<PerformanceIntelligence />}
-          />
-          {/* Admin/Manager Routes */}
-          <Route
-            path="internops"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL']}>
-                <InternOps />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="reports"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL']}>
-                <Reports />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="report-templates"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL']}>
-                <ReportTemplates />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="notices"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL']}>
-                <Notices />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="analytics"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL']}>
-                <Analytics />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="exports"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL']}>
-                <Exports />
-              </RoleGuard>
-            }
-          />
-
-          <Route
-            path="admin"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL', 'TL']}>
-                <AdminDashboard />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="departments"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL', 'TL']}>
-                <Departments />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="admin/departments"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL', 'TL']}>
-                <Departments />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="departments/:deptId/projects"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL', 'TL']}>
-                <ProjectsPage />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="departments/:deptId/projects/:leadId"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL', 'TL']}>
-                <ProjectDetailPage />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="admin/departments/:deptId/attendance"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL', 'TL']}>
-                <Attendance />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="admin/departments/:deptId/ratings"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL', 'TL']}>
-                <Ratings />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="admin/departments/:deptId/tasks"
-            element={
-              <RoleGuard allowedRoles={['ADMIN', 'SENIOR_TL', 'TL']}>
-                <Tasks />
-              </RoleGuard>
-            }
-          />
-
-          <Route
-            path="audit"
-            element={
-              <RoleGuard allowedRoles={['ADMIN']}>
-                <AuditLog />
-              </RoleGuard>
-            }
-          />
-
-          {/* Certificate & Canva Routes (Admin only) */}
-          <Route
-            path="quick-generate"
-            element={
-              <RoleGuard allowedRoles={['ADMIN']}>
-                <QuickGenerate />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="certificates"
-            element={
-              <RoleGuard allowedRoles={['ADMIN']}>
-                <Certificates />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="bulk-generate"
-            element={
-              <RoleGuard allowedRoles={['ADMIN']}>
-                <BulkGenerate />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="canva-templates"
-            element={
-              <RoleGuard allowedRoles={['ADMIN']}>
-                <CanvaTemplates />
-              </RoleGuard>
-            }
-          />
-          <Route path="canva-templates/callback" element={<CanvaCallback />} />
-          <Route
-            path="ai-certificates"
-            element={
-              <RoleGuard allowedRoles={['ADMIN']}>
-                <AICertificates />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="feature-flags"
-            element={
-              <RoleGuard allowedRoles={['ADMIN']}>
-                <FeatureFlags />
-              </RoleGuard>
-            }
-          />
-          <Route
-            path="github-sync"
-            element={
-              <RoleGuard allowedRoles={['ADMIN']}>
-                <GithubSync />
-              </RoleGuard>
-            }
-          />
+          {/* All other privileged routes are resolved only after clearance is known */}
+          <Route path="*" element={<PrivilegedRouteGate />} />
         </Route>
       </Routes>
     </ErrorBoundary>

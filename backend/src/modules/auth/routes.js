@@ -3,6 +3,7 @@ const {
 } = require('../../middleware/sanitize');
 const service = require('./service');
 const { z } = require('zod');
+const { EMAIL_MAX_LENGTH, PASSWORD_MAX_LENGTH } = require('./passwordPolicy');
 const rbac = require('../../middleware/rbac');
 const { bruteForceCheck } = require('../../middleware/bruteForce');
 const auth = require('../../middleware/auth');
@@ -34,8 +35,16 @@ async function routes(fastify) {
           type: 'object',
           required: ['email', 'password', 'role'],
           properties: {
-            email: { type: 'string', format: 'email' },
-            password: { type: 'string', minLength: 8 },
+            email: {
+              type: 'string',
+              format: 'email',
+              maxLength: EMAIL_MAX_LENGTH,
+            },
+            password: {
+              type: 'string',
+              minLength: 8,
+              maxLength: PASSWORD_MAX_LENGTH,
+            },
             role: {
               type: 'string',
               enum: [
@@ -82,8 +91,16 @@ async function routes(fastify) {
                 required: ['email', 'password', 'role'],
                 properties: {
                   full_name: { type: 'string' },
-                  email: { type: 'string', format: 'email' },
-                  password: { type: 'string', minLength: 8 },
+                  email: {
+                    type: 'string',
+                    format: 'email',
+                    maxLength: EMAIL_MAX_LENGTH,
+                  },
+                  password: {
+                    type: 'string',
+                    minLength: 8,
+                    maxLength: PASSWORD_MAX_LENGTH,
+                  },
                   role: {
                     type: 'string',
                     enum: [
@@ -205,8 +222,12 @@ async function routes(fastify) {
           type: 'object',
           required: ['email', 'password'],
           properties: {
-            email: { type: 'string', format: 'email' },
-            password: { type: 'string' },
+            email: {
+              type: 'string',
+              format: 'email',
+              maxLength: EMAIL_MAX_LENGTH,
+            },
+            password: { type: 'string', maxLength: PASSWORD_MAX_LENGTH },
           },
         },
       },
@@ -257,6 +278,12 @@ async function routes(fastify) {
     {
       preHandler: [sanitize],
       schema: { tags: ['Authentication'], description: 'Refresh access token' },
+      config: {
+        rateLimit: {
+          max: config.rateLimit.refreshMax,
+          timeWindow: config.rateLimit.timeWindow,
+        },
+      },
     },
     async (req, reply) => {
       const token = req.cookies.refreshToken;
@@ -287,6 +314,8 @@ async function routes(fastify) {
         ...config.cookie,
         path: '/api/v1/auth/refresh',
       });
+
+      rotateAndSetCsrf(req, reply, tokens.user.id);
 
       return {
         accessToken: tokens.accessToken,
@@ -390,7 +419,15 @@ async function routes(fastify) {
   // Get CSRF token
   fastify.get(
     '/csrf-token',
-    { schema: { tags: ['Authentication'], description: 'Get CSRF token' } },
+    {
+      schema: { tags: ['Authentication'], description: 'Get CSRF token' },
+      config: {
+        rateLimit: {
+          max: config.rateLimit.csrfMax,
+          timeWindow: config.rateLimit.timeWindow,
+        },
+      },
+    },
     async (req, reply) => {
       const csrfToken = generateToken(req, reply);
       return { csrfToken };
@@ -448,7 +485,13 @@ async function routes(fastify) {
         body: {
           type: 'object',
           required: ['email'],
-          properties: { email: { type: 'string', format: 'email' } },
+          properties: {
+            email: {
+              type: 'string',
+              format: 'email',
+              maxLength: EMAIL_MAX_LENGTH,
+            },
+          },
         },
       },
       config: {
@@ -486,7 +529,11 @@ async function routes(fastify) {
           required: ['token', 'newPassword'],
           properties: {
             token: { type: 'string' },
-            newPassword: { type: 'string', minLength: 8 },
+            newPassword: {
+              type: 'string',
+              minLength: 8,
+              maxLength: PASSWORD_MAX_LENGTH,
+            },
           },
         },
       },
@@ -501,7 +548,10 @@ async function routes(fastify) {
     },
     async (req, reply) => {
       const { token, newPassword } = z
-        .object({ token: z.string(), newPassword: z.string().min(8) })
+        .object({
+          token: z.string(),
+          newPassword: z.string().min(8).max(PASSWORD_MAX_LENGTH),
+        })
         .parse(req.body);
       const auditLogData = await resetPassword(
         token,

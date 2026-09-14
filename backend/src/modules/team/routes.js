@@ -10,6 +10,10 @@ const { createAuditLog, extractRequestInfo } = require('../../utils/audit');
 const { toSchema } = require('../../utils/schemaHelper');
 const { checkHierarchyAccess, ROLE_RANK } = require('../../utils/hierarchy');
 const { z } = require('zod');
+const {
+  EMAIL_MAX_LENGTH,
+  PASSWORD_MAX_LENGTH,
+} = require('../auth/passwordPolicy');
 
 // Roles that manage a team (Interns have no reports).
 const MANAGER_ROLES = ['ADMIN', 'SENIOR_TL', 'TL', 'CAPTAIN'];
@@ -73,10 +77,11 @@ const updateSchema = z.object(detailFields).superRefine((data, ctx) => {
     });
 });
 const createSchema = z.object({
-  email: z.string().email(),
+  email: z.string().email().max(EMAIL_MAX_LENGTH),
   password: z
     .string()
     .min(8)
+    .max(PASSWORD_MAX_LENGTH)
     .regex(
       /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/,
       'Password is too weak. Use at least 8 characters with uppercase, lowercase, number, and special character.'
@@ -183,8 +188,16 @@ async function routes(fastify) {
           type: 'object',
           required: ['email', 'password', 'role'],
           properties: {
-            email: { type: 'string', format: 'email' },
-            password: { type: 'string', minLength: 8 },
+            email: {
+              type: 'string',
+              format: 'email',
+              maxLength: EMAIL_MAX_LENGTH,
+            },
+            password: {
+              type: 'string',
+              minLength: 8,
+              maxLength: PASSWORD_MAX_LENGTH,
+            },
             role: {
               type: 'string',
               enum: ['SENIOR_TL', 'TL', 'CAPTAIN', 'INTERN'],
@@ -599,14 +612,18 @@ async function routes(fastify) {
           type: 'object',
           required: ['password'],
           properties: {
-            password: { type: 'string', minLength: 8 },
+            password: {
+              type: 'string',
+              minLength: 8,
+              maxLength: PASSWORD_MAX_LENGTH,
+            },
           },
         },
       },
     },
     async (req, reply) => {
       const { password } = z
-        .object({ password: z.string().min(8) })
+        .object({ password: z.string().min(8).max(PASSWORD_MAX_LENGTH) })
         .parse(req.body);
 
       const before = await repo.getMemberById(req.params.id);

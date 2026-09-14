@@ -12,6 +12,7 @@ const { z } = require('zod');
 const authRepo = require('../auth/repository');
 const { toSchema } = require('../../utils/schemaHelper');
 const { isValidStep, checkHierarchyAccess } = require('../../utils/hierarchy');
+const { PASSWORD_MAX_LENGTH } = require('../auth/passwordPolicy');
 
 const SENIOR_TL_MANAGEABLE_ROLES = new Set(['TL', 'CAPTAIN', 'INTERN']);
 const TL_MANAGEABLE_ROLES = new Set(['CAPTAIN', 'INTERN']);
@@ -126,8 +127,8 @@ const isValidAvatarUrl = (val) => {
 };
 
 const changePasswordSchema = z.object({
-  oldPassword: z.string(),
-  newPassword: z.string().min(8),
+  oldPassword: z.string().max(PASSWORD_MAX_LENGTH),
+  newPassword: z.string().min(8).max(PASSWORD_MAX_LENGTH),
 });
 
 const updateProfileSchema = z.object({
@@ -356,10 +357,77 @@ async function routes(fastify) {
     {
       preHandler: [auth, rbac(['ADMIN'])],
     },
-    async (request, reply) => {
-      try {
-        const { id } = request.params;
-        const confirmation = request.body?.confirmation;
+    async (req, reply) => {
+      // Prevent self-deletion
+      if (req.user.id === req.params.id) {
+        return reply.status(400).send({
+          error: 'You cannot delete your own account',
+        });
+      }
+
+      const {
+        rows: [targetUser],
+      } = await repo.getUserById(req.params.id);
+
+      if (!targetUser) {
+        return reply.status(404).send({ error: 'User not found' });
+      }
+      if (!(await authorizeUserManagement(req, reply, targetUser, 'delete'))) {
+        return;
+      }
+      if (targetUser.role === 'ADMIN') {
+        return reply.status(409).send({
+          error: 'Admin accounts cannot be removed.',
+        });
+      }
+
+      if (
+        req.body?.confirmation?.trim().toLowerCase() !==
+        targetUser.email.toLowerCase()
+      ) {
+        return reply.status(400).send({
+          error: 'Type the exact user email address to confirm account removal',
+          code: 'CONFIRMATION_MISMATCH',
+        });
+      }
+      const removedUser = await repo.safelyRemoveUser(req.params.id);
+      if (!removedUser)
+        return reply.status(404).send({ error: 'User not found' });
+
+      req.auditOnResponse = {
+        userId: req.user.id,
+        action: 'USER_REMOVED',
+        resourceType: 'user',
+        resourceId: req.params.id,
+      };
+
+      return { message: 'User access removed and personal data anonymized' };
+    }
+  );
+
+  // Change own password
+  fastify.patch(
+    '/me/password',
+    {
+      preHandler: [auth, sanitize],
+      schema: {
+        tags: ['Users'],
+        description: 'Change own password',
+        body: toSchema(changePasswordSchema),
+      },
+    },
+    async (req, reply) => {
+      const schema = z.object({
+        oldPassword: z.string(),
+        newPassword: z.string().min(8).max(PASSWORD_MAX_LENGTH),
+      });
+
+      const { oldPassword, newPassword } = schema.parse(req.body);
+      const user = await authRepo.findById(req.user.id);
+
+      if (!user) return reply.status(404).send({ error: 'User not found' });
+
+      const valid = await authRepo.verifyPassword(user, oldPassword);
 
         const target = await repo.findById(id);
 
