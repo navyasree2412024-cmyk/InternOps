@@ -17,6 +17,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import api from '../lib/axios';
+import { uploadFilesInChunks } from '../lib/chunkedUpload';
 import useAuthStore from '../store/auth';
 import CreateTaskForm from '../components/CreateTaskForm';
 import { Card, Btn, Badge, EmptyState, Spinner } from '../components/ui';
@@ -320,6 +321,7 @@ export default function Tasks({ isProjectView = false, roster = [] } = {}) {
   const [showForm, setShowForm] = useState(false);
   const [selectedProofTaskId, setSelectedProofTaskId] = useState(null);
   const [notification, setNotification] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState({});
   const [draftFiles, setDraftFiles] = useState({
     taskId: null,
     files: [],
@@ -388,6 +390,78 @@ export default function Tasks({ isProjectView = false, roster = [] } = {}) {
 
       files.forEach((file) => {
         form.append('image', file);
+      });
+      const chunkedUploadMutation = useMutation({
+        mutationFn: async ({ taskId, files }) => {
+          if (!taskId) {
+            throw new Error('Task ID is required');
+          }
+
+          if (!Array.isArray(files) || files.length === 0) {
+            throw new Error('Please select at least one file');
+          }
+
+          return uploadFilesInChunks(files, {
+            onProgress: (file, progress) => {
+              setUploadProgress((current) => ({
+                ...current,
+                [taskId]: {
+                  fileName: file.name,
+                  progress: progress.progress ?? 0,
+                  receivedBytes: progress.receivedBytes ?? 0,
+                  totalSize: progress.totalSize ?? file.size,
+                  receivedChunks: progress.receivedChunks ?? 0,
+                  totalChunks: progress.totalChunks ?? 0,
+                  status: progress.status ?? 'uploading',
+                },
+              }));
+            },
+          });
+        },
+
+        onSuccess: (_, variables) => {
+          setUploadProgress((current) => ({
+            ...current,
+            [variables.taskId]: {
+              ...(current[variables.taskId] || {}),
+              progress: 100,
+              status: 'completed',
+            },
+          }));
+
+          showNotification('Chunked upload completed successfully');
+
+          queryClient.invalidateQueries({
+            queryKey: ['proofs', variables.taskId],
+          });
+
+          queryClient.invalidateQueries({
+            queryKey: ['proofs'],
+          });
+
+          queryClient.invalidateQueries({
+            queryKey: ['tasks'],
+          });
+
+          queryClient.invalidateQueries({
+            queryKey: ['myProofs'],
+          });
+        },
+
+        onError: (error, variables) => {
+          setUploadProgress((current) => {
+            const next = { ...current };
+            delete next[variables.taskId];
+            return next;
+          });
+
+          const errorMessage =
+            error?.response?.data?.error ||
+            error?.message ||
+            'Chunked upload failed';
+
+          showNotification(errorMessage);
+        },
       });
 
       form.append('didComment', String(!!didComment));

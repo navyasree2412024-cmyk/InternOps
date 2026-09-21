@@ -62,6 +62,9 @@ module.exports = async function routes(fastify, opts) {
   fastify.register(require('./modules/uploads/routes'), {
     prefix: '/uploads',
   });
+  fastify.register(require('./modules/chunked-uploads/routes'), {
+    prefix: '/uploads/chunked',
+  });
   fastify.register(require('./modules/analytics/routes'), {
     prefix: '/analytics',
   });

@@ -110,6 +110,14 @@ module.exports = {
   appUrl:
     process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173',
   redis: buildRedisConfig(),
+  storage: {
+    endpoint: process.env.STORAGE_ENDPOINT || '',
+    region: process.env.STORAGE_REGION || 'us-east-1',
+    bucket: process.env.STORAGE_BUCKET || '',
+    accessKeyId: process.env.STORAGE_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.STORAGE_SECRET_ACCESS_KEY || '',
+    forcePathStyle: process.env.STORAGE_FORCE_PATH_STYLE === 'true',
+  },
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,

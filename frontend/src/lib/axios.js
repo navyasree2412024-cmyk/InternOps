@@ -181,6 +181,10 @@ function getMemoryAccessToken() {
   return _authStore?.getState?.()?.accessToken || null;
 }
 
+export function getAccessToken() {
+  return getMemoryAccessToken();
+}
+
 api.interceptors.request.use(async (config) => {
   const token = getMemoryAccessToken();
 
