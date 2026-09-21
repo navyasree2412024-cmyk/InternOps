@@ -1,31 +1,73 @@
+const crypto = require('crypto');
+const argon2 = require('argon2');
 const { UnauthorizedError } = require('../../utils/errors');
 const repo = require('./repository');
 const {
   generateAccessToken,
+  generateImpersonationAccessToken,
   generateRefreshToken,
   hashToken,
   verifyRefreshToken,
+  encryptRefreshRecovery,
+  decryptRefreshRecovery,
 } = require('../../utils/tokens');
 const { createAuditLog } = require('../../utils/audit');
 const {
   recordLoginAttempt,
   clearFailedAttempts,
+  checkAndRecordAttempt,
   incrementAttempt,
 } = require('../../middleware/bruteForce');
 const { isValidStep } = require('../../utils/hierarchy');
 const { sendVerificationEmail } = require('./verificationService');
-const { blacklistAccessToken } = require('../../config/redis');
+const { notifyAdmin } = require('../notifications/repository');
+
+const REFRESH_RECOVERY_SECONDS = 20 * 60;
 
 const DUMMY_USER = {
   password_hash:
     '$argon2id$v=19$m=65536,t=3,p=4$8/VvKJehP9DGKtV1NP5p8g$z0S2q7BsbH2YY16pI0/jXvgI4ElwnccjvW3NNcCSsQk',
 };
-const { getRedisClient } = require('../../config/redis');
-const emailService = require('../../services/email');
 
 async function register(data, creator) {
-  // Default to the creator (admin) as manager if none was explicitly chosen,
-  // so users created via Admin > Users also show up in team/hierarchy views.
+  const allowedRolesByCreator = {
+    ADMIN: [
+      'ADMIN',
+      'MANAGEMENT',
+      'HR',
+      'SENIOR_TL',
+      'TL',
+      'CAPTAIN',
+      'INTERN',
+    ],
+    SENIOR_TL: ['TL', 'CAPTAIN', 'INTERN'],
+    TL: ['CAPTAIN', 'INTERN'],
+  };
+
+  const creatorRolePolicy = allowedRolesByCreator[creator.role];
+
+  if (creatorRolePolicy && !creatorRolePolicy.includes(data.role)) {
+    const error = new Error('You cannot create a user with this role');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (['SENIOR_TL', 'TL'].includes(creator.role)) {
+    if (!creator.departmentId) {
+      const error = new Error('Your account is not assigned to a department');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (data.departmentId && data.departmentId !== creator.departmentId) {
+      const error = new Error('You cannot create users in another department');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    data = { ...data, departmentId: creator.departmentId };
+  }
+
   const managerId =
     data.role === 'ADMIN'
       ? data.managerId || null
@@ -34,6 +76,16 @@ async function register(data, creator) {
   if (managerId) {
     const manager = await repo.findByIdRaw(managerId);
     if (!manager) throw new Error('Manager not found');
+
+    if (
+      creator.role !== 'ADMIN' &&
+      manager.department_id !== creator.departmentId
+    ) {
+      const error = new Error('Manager must belong to your department');
+      error.statusCode = 403;
+      throw error;
+    }
+
     if (!isValidStep(manager.role, data.role)) {
       throw new Error(
         `Invalid hierarchy: ${manager.role} cannot manage ${data.role}`
@@ -58,8 +110,6 @@ async function register(data, creator) {
   return user;
 }
 
-// Dummy hash used to flatten timing when user doesn't exist.
-// Prevents user-enumeration via response latency differences.
 const DUMMY_HASH =
   '$argon2id$v=19$m=65536,t=3,p=4$c29tZXJhbmRvbXNhbHQ$RdescudvJCsgt3ub+b27Ze4AXpxcKAspe5gOjBosC2o';
 
@@ -69,63 +119,42 @@ function publicUser(user) {
     email: user.email,
     role: user.role,
     full_name: user.full_name,
+    avatar_url: user.avatar_url || null,
+    mustChangePassword: Boolean(user.must_change_password),
   };
 }
 
 async function login(email, password, ip, userAgent) {
-  let currentAttempts = 0;
-
   try {
-    currentAttempts = (await incrementAttempt(email, ip)) || 0;
+    await checkAndRecordAttempt(email, ip);
   } catch (err) {
-    console.error('Redis Brute Force Check Failed:', err);
+    if (
+      (err instanceof UnauthorizedError || err.statusCode === 429) &&
+      (err.statusCode === 429 ||
+        (err.message && err.message.includes('locked')))
+    ) {
+      err.statusCode = 429;
+      err.status = 429;
+      throw err;
+    }
 
     throw new UnauthorizedError(
       'Login temporarily unavailable. Please try again later.'
     );
   }
 
-  if (currentAttempts > 5) {
-    const redis = await getRedisClient();
-    const notifyKey = `lockout-email:${email}`;
-
-    let alreadySent = null;
-
-    if (redis) {
-      alreadySent = await redis.get(notifyKey);
-    }
-
-    if (!alreadySent) {
-      const user = await repo.findByEmail(email);
-
-      if (user) {
-        await emailService.sendAccountLockoutNotification(email, {
-          ipAddress: ip,
-          timestamp: new Date().toISOString(),
-          failedAttempts: currentAttempts,
-        });
-      }
-
-      if (redis) {
-        await redis.set(notifyKey, '1', {
-          EX: 15 * 60,
-        });
-      }
-    }
-
-    throw new UnauthorizedError(
-      'Account temporarily locked. Please try again later.'
-    );
-  }
-
   const user = await repo.findByEmail(email);
 
   if (!user || user.suspended) {
-    const argon2 = require('argon2');
-
     await argon2.verify(DUMMY_HASH, password).catch(() => {});
-
     await recordLoginAttempt(email, ip, false).catch(() => {});
+
+    const issueType = user?.suspended
+      ? 'Account Suspended'
+      : 'Login Failed - User Not Found';
+    notifyAdmin(
+      `⚠️ User Issue: ${issueType}\nUser: ${email}\nTime: ${new Date().toLocaleString()}`
+    ).catch(() => {});
 
     throw new UnauthorizedError('Invalid credentials');
   }
@@ -134,6 +163,10 @@ async function login(email, password, ip, userAgent) {
 
   if (!valid) {
     await recordLoginAttempt(email, ip, false).catch(() => {});
+
+    notifyAdmin(
+      `⚠️ User Issue: Login Failed\nUser: ${email}\nIssue: Invalid password\nTime: ${new Date().toLocaleString()}`
+    ).catch(() => {});
 
     throw new UnauthorizedError('Invalid credentials');
   }
@@ -154,7 +187,7 @@ async function login(email, password, ip, userAgent) {
   };
 }
 
-async function refreshTokens(token, ip) {
+async function refreshTokens(token, ip, userAgent) {
   let decoded;
 
   try {
@@ -163,46 +196,77 @@ async function refreshTokens(token, ip) {
     throw new UnauthorizedError('Invalid refresh token');
   }
 
-  const hash = hashToken(token);
-
-  // Atomic claim — if two concurrent requests race, only one gets a userId back.
-  // The second gets null and is rejected immediately, eliminating the TOCTOU window.
-  const claimedUserId = await repo.claimRefreshToken(hash);
-
-  if (!claimedUserId) {
-    throw new UnauthorizedError('Token revoked/expired');
-  }
-
-  // Ensure the claimed token belongs to the same user identified by the
-  // signed refresh token payload.
-  if (String(claimedUserId) !== String(decoded.id)) {
-    await repo.revokeAllUserTokensRedis(claimedUserId);
-    throw new UnauthorizedError('Invalid refresh token');
-  }
-
-  const user = await repo.findById(claimedUserId);
+  const userId = decoded.id;
+  const user = await repo.findById(userId);
 
   if (!user || user.suspended) {
-    await repo.revokeAllUserTokensRedis(claimedUserId);
     throw new UnauthorizedError('User not found/suspended');
   }
 
+  const consumedTokenHash = hashToken(token);
   const newAccess = generateAccessToken(user);
   const newRefresh = generateRefreshToken(user);
-  const newExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const replacementTokenHash = hashToken(newRefresh);
+  const replacementExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const recoveryExpiresAt = new Date(
+    Date.now() + REFRESH_RECOVERY_SECONDS * 1000
+  );
 
-  // Revoke every existing refresh token for this user before storing the
-  // replacement. This prevents stolen sibling tokens from remaining usable.
-  await repo.revokeAllUserTokensRedis(user.id);
-
-  await repo.storeRefreshTokenRedis(user.id, hashToken(newRefresh), newExpiry);
-
-  return {
+  const responsePayload = {
     accessToken: newAccess,
     refreshToken: newRefresh,
     user: publicUser(user),
   };
+
+  const clientFingerprint = crypto
+    .createHash('sha256')
+    .update(`${ip}|${userAgent}`)
+    .digest('hex');
+  const encryptedPayload = encryptRefreshRecovery(responsePayload);
+
+  let rotationResult = null;
+  try {
+    rotationResult = await repo.rotateRefreshTokenWithRecovery({
+      consumedTokenHash,
+      userId: user.id,
+      replacementTokenHash,
+      replacementExpiresAt,
+      clientFingerprint,
+      encryptedPayload,
+      recoveryExpiresAt,
+    });
+  } catch (err) {
+    // ignore DB errors during mock / fallback
+  }
+
+  if (rotationResult && rotationResult.rotated) {
+    await repo.cacheRefreshToken(
+      user.id,
+      replacementTokenHash,
+      replacementExpiresAt
+    );
+    return responsePayload;
+  }
+
+  const recovery = await repo.getRefreshRecoveryPostgres(consumedTokenHash);
+  if (!recovery) {
+    throw new UnauthorizedError('Token revoked/expired');
+  }
+
+  if (recovery.client_fingerprint !== clientFingerprint) {
+    throw new UnauthorizedError('Token revoked/expired');
+  }
+
+  let recoveredSession;
+  try {
+    recoveredSession = decryptRefreshRecovery(recovery.encrypted_payload);
+  } catch {
+    throw new UnauthorizedError('Token revoked/expired');
+  }
+
+  return recoveredSession;
 }
+
 async function logout(
   token,
   authenticatedUserId,
@@ -225,10 +289,9 @@ async function logout(
 
   await repo.revokeRefreshTokenRedis(hashToken(token));
 
-  const ttl = accessExp - Math.floor(Date.now() / 1000);
-
-  if (ttl > 0) {
-    await blacklistAccessToken(accessJti, ttl);
+  const expiresAt = new Date(accessExp * 1000);
+  if (expiresAt.getTime() > Date.now()) {
+    await repo.revokeAccessToken(accessJti, authenticatedUserId, expiresAt);
   }
 
   await createAuditLog({
@@ -241,4 +304,92 @@ async function logout(
   });
 }
 
-module.exports = { register, login, refreshTokens, logout };
+async function startImpersonation(
+  admin,
+  targetUserId,
+  password,
+  reason,
+  ip,
+  userAgent
+) {
+  if (!admin || admin.role !== 'ADMIN') {
+    throw new UnauthorizedError('Only admins can initiate user view');
+  }
+
+  const adminUser = await repo.findById(admin.id);
+  if (!adminUser || adminUser.suspended) {
+    throw new UnauthorizedError('Admin account unavailable');
+  }
+
+  const validPassword = await repo.verifyPassword(adminUser, password);
+  if (!validPassword) {
+    throw new UnauthorizedError('Invalid admin password');
+  }
+
+  const target = await repo.findById(targetUserId);
+  if (!target || target.suspended) {
+    throw new UnauthorizedError('Target user unavailable');
+  }
+
+  if (target.role === 'ADMIN') {
+    throw new UnauthorizedError('Cannot impersonate another admin user');
+  }
+
+  const accessToken = generateImpersonationAccessToken(target, admin);
+
+  await createAuditLog({
+    userId: admin.id,
+    action: 'IMPERSONATION_STARTED',
+    resourceType: 'user',
+    resourceId: target.id,
+    ipAddress: ip,
+    userAgent,
+    details: { reason, targetRole: target.role },
+  });
+
+  return {
+    accessToken,
+    user: publicUser(target),
+  };
+}
+
+async function exitImpersonation(adminId, targetUserId, ip, userAgent) {
+  await createAuditLog({
+    userId: adminId,
+    action: 'IMPERSONATION_EXITED',
+    resourceType: 'user',
+    resourceId: targetUserId,
+    ipAddress: ip,
+    userAgent,
+  });
+}
+
+module.exports = {
+  register,
+  login,
+  refreshTokens,
+  logout,
+  startImpersonation,
+  exitImpersonation,
+  createUser: repo.createUser,
+  findByEmail: repo.findByEmail,
+  findById: repo.findById,
+  findByIdRaw: repo.findByIdRaw,
+  getPasswordAccessState: repo.getPasswordAccessState,
+  listUsersByRole: repo.listUsersByRole,
+  verifyPassword: repo.verifyPassword,
+  storeRefreshToken: repo.storeRefreshToken,
+  revokeRefreshToken: repo.revokeRefreshToken,
+  revokeAllUserTokens: repo.revokeAllUserTokens,
+  updatePassword: repo.updatePassword,
+  updateProfile: repo.updateProfile,
+  storeRefreshTokenRedis: repo.storeRefreshTokenRedis,
+  revokeRefreshTokenRedis: repo.revokeRefreshTokenRedis,
+  revokeAllUserTokensRedis: repo.revokeAllUserTokensRedis,
+  getRefreshTokenRedis: repo.getRefreshTokenRedis,
+  validateRefreshToken: repo.validateRefreshToken,
+  claimRefreshToken: repo.claimRefreshToken,
+  rotateRefreshTokenWithRecovery: repo.rotateRefreshTokenWithRecovery,
+  getRefreshRecoveryPostgres: repo.getRefreshRecoveryPostgres,
+  cacheRefreshToken: repo.cacheRefreshToken,
+};

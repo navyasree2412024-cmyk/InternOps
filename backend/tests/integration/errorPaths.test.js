@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const jwt = require('jsonwebtoken');
 const app = require('../../src/app');
 const pool = require('../../src/config/db');
@@ -25,6 +27,50 @@ describe('API error-path integration tests', () => {
     await app.close();
   });
 
+  it('accepts unauthenticated client error reports without CSRF', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/client-error',
+      payload: {
+        message: 'Test client error',
+        stack: 'Error: Test client error',
+        componentStack: 'at TestComponent',
+        url: 'http://localhost:5173/dashboard',
+        userAgent: 'test-agent',
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    expect(res.statusCode).toBe(204);
+  });
+
+  it('handles malformed CSRF cookies without server errors or delays', async () => {
+    const cases = [
+      'csrf-sid=abc%',
+      'csrf-token=abc%',
+      'csrf-sid=1%20AND%20SLEEP(5)',
+      'csrf-token=1%20AND%20SLEEP(5)',
+    ];
+
+    for (const cookie of cases) {
+      const startedAt = Date.now();
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/csrf-token',
+        headers: { cookie },
+      });
+      const durationMs = Date.now() - startedAt;
+      const body = JSON.parse(res.body);
+
+      expect(res.statusCode).toBe(200);
+      expect(durationMs).toBeLessThan(2000);
+      expect(body.csrfToken).toEqual(expect.any(String));
+      expect(body.csrfToken).not.toHaveLength(0);
+      expect(res.body).not.toMatch(
+        /stack|sql|select|sleep\s*\(|node_modules|internal server error/i
+      );
+    }
+  });
   it('returns a sanitized 500 when a database operation fails', async () => {
     const dbError = new Error('database connection refused');
     const query = jest.spyOn(pool, 'query').mockRejectedValueOnce(dbError);
@@ -35,8 +81,15 @@ describe('API error-path integration tests', () => {
       payload: { email: 'admin@internops.com', password: 'Admin@123' },
     });
 
+    const body = JSON.parse(res.body);
     expect(res.statusCode).toBe(500);
-    expect(JSON.parse(res.body)).toEqual({ error: 'Internal Server Error' });
+    expect(body).toEqual({
+      error: 'Internal Server Error',
+      message: 'Internal Server Error',
+      code: 'INTERNAL_ERROR',
+      requestId: expect.any(String),
+    });
+    expect(body.requestId).not.toHaveLength(0);
     expect(res.body).not.toContain(dbError.message);
     expect(res.body).not.toContain('stack');
     query.mockRestore();
@@ -79,7 +132,12 @@ describe('API error-path integration tests', () => {
   });
 
   it('returns 413 when an avatar upload exceeds the configured file limit', async () => {
-    const userId = '00000000-0000-4000-8000-000000000001';
+    const { rows } = await pool.query(
+      `SELECT id FROM users
+       WHERE role = 'ADMIN' AND suspended = FALSE AND deleted_at IS NULL
+       ORDER BY created_at ASC LIMIT 1`
+    );
+    const userId = rows[0].id;
     const token = jwt.sign(
       { id: userId, role: 'ADMIN', typ: 'access', jti: 'error-path-upload' },
       config.jwt.secret,
@@ -109,6 +167,7 @@ describe('API error-path integration tests', () => {
         authorization: `Bearer ${token}`,
         'x-csrf-token': csrfToken,
         'content-type': `multipart/form-data; boundary=${boundary}`,
+        origin: 'http://localhost:5173',
       },
       payload: multipartBody(boundary, 'too-large.png', pngWithOversizePayload),
     });
@@ -116,20 +175,116 @@ describe('API error-path integration tests', () => {
     expect(res.statusCode).toBe(413);
     expect(JSON.parse(res.body).error).toMatch(/file.*(size|large)|maximum/i);
   });
+
+  it('removes the current avatar and deletes its stored file', async () => {
+    const { rows } = await pool.query(
+      `SELECT id, avatar_url FROM users
+       WHERE role = 'ADMIN' AND suspended = FALSE AND deleted_at IS NULL
+       ORDER BY created_at ASC LIMIT 1`
+    );
+
+    const userId = rows[0].id;
+    const originalAvatarUrl = rows[0].avatar_url;
+    const fileName = `avatar_remove_test_${Date.now()}.png`;
+    const avatarUrl = `/uploads/${fileName}`;
+    const filePath = path.resolve(
+      __dirname,
+      '..',
+      '..',
+      config.uploadDir,
+      fileName
+    );
+
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, Buffer.from('test avatar'));
+    await pool.query('UPDATE users SET avatar_url = $1 WHERE id = $2', [
+      avatarUrl,
+      userId,
+    ]);
+
+    try {
+      const token = jwt.sign(
+        {
+          id: userId,
+          role: 'ADMIN',
+          typ: 'access',
+          jti: 'remove-avatar-test',
+        },
+        config.jwt.secret,
+        { algorithm: 'HS256', expiresIn: '5m' }
+      );
+
+      const csrfRes = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/csrf-token',
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      const csrfToken = JSON.parse(csrfRes.body).csrfToken;
+      const cookies = mergeCookies(
+        {},
+        parseSetCookie(csrfRes.headers['set-cookie'])
+      );
+
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/api/v1/uploads/avatar',
+        cookies,
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-csrf-token': csrfToken,
+          origin: 'http://localhost:5173',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body)).toEqual({
+        success: true,
+        avatar_url: null,
+      });
+
+      const updated = await pool.query(
+        'SELECT avatar_url FROM users WHERE id = $1',
+        [userId]
+      );
+
+      expect(updated.rows[0].avatar_url).toBeNull();
+      expect(fs.existsSync(filePath)).toBe(false);
+    } finally {
+      await pool.query('UPDATE users SET avatar_url = $1 WHERE id = $2', [
+        originalAvatarUrl,
+        userId,
+      ]);
+
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+  });
 });
-
 describe('Redis unavailability fallback', () => {
-  it('continues token checks when Redis is unavailable', async () => {
-    const {
-      getRedisClient,
-      isAccessTokenBlacklisted,
-      blacklistAccessToken,
-    } = require('../../src/config/redis');
+  it('uses PostgreSQL revocation when Redis is unavailable', async () => {
+    const repository = require('../../src/modules/auth/repository');
+    const { getRedisClient } = require('../../src/config/redis');
+    const jti = `revocation-fallback-${Date.now()}`;
+    const user = await pool.query(
+      `SELECT id FROM users WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1`
+    );
+    const userId = user.rows[0].id;
+    const expiresAt = new Date(Date.now() + 60_000);
 
-    // Test mode intentionally makes the Redis client unavailable. The
-    // application must treat that the same as a failed optional connection.
     await expect(getRedisClient()).resolves.toBeNull();
-    await expect(isAccessTokenBlacklisted('token-id')).resolves.toBe(false);
-    await expect(blacklistAccessToken('token-id', 60)).resolves.toBeUndefined();
+
+    try {
+      await repository.revokeAccessToken(jti, userId, expiresAt);
+      await expect(repository.isAccessTokenRevoked(jti)).resolves.toBe(true);
+      await expect(
+        repository.isAccessTokenRevoked(`${jti}-not-revoked`)
+      ).resolves.toBe(false);
+    } finally {
+      await pool.query('DELETE FROM revoked_access_tokens WHERE jti = $1', [
+        jti,
+      ]);
+    }
   });
 });

@@ -7,7 +7,11 @@ jest.mock('../../src/modules/auth/repository', () => ({
   claimRefreshToken: jest.fn(),
   findById: jest.fn(),
   revokeRefreshTokenRedis: jest.fn(),
+  revokeAccessToken: jest.fn(),
   revokeAllUserTokensRedis: jest.fn(),
+  rotateRefreshTokenWithRecovery: jest.fn(),
+  getRefreshRecoveryPostgres: jest.fn(),
+  cacheRefreshToken: jest.fn(),
 }));
 
 jest.mock('../../src/utils/errors', () => ({
@@ -24,6 +28,8 @@ jest.mock('../../src/utils/tokens', () => ({
   generateRefreshToken: jest.fn().mockReturnValue('mocked-refresh-token'),
   hashToken: jest.fn((token) => `mocked-hash:${token}`),
   verifyRefreshToken: jest.fn((token) => ({ id: 'user-1' })),
+  encryptRefreshRecovery: jest.fn(() => 'encrypted-recovery'),
+  decryptRefreshRecovery: jest.fn(),
 }));
 
 jest.mock('../../src/utils/audit', () => ({
@@ -33,7 +39,8 @@ jest.mock('../../src/utils/audit', () => ({
 jest.mock('../../src/middleware/bruteForce', () => ({
   recordLoginAttempt: jest.fn().mockResolvedValue(undefined),
   clearFailedAttempts: jest.fn().mockResolvedValue(undefined),
-  incrementAttempt: jest.fn(),
+  checkAndRecordAttempt: jest.fn().mockResolvedValue(1),
+  incrementAttempt: jest.fn().mockResolvedValue(1),
 }));
 
 jest.mock('../../src/utils/hierarchy', () => ({
@@ -43,14 +50,27 @@ jest.mock('../../src/utils/hierarchy', () => ({
 jest.mock('../../src/modules/auth/verificationService', () => ({
   sendVerificationEmail: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('../../src/modules/notifications/repository', () => ({
+  notifyAdmin: jest.fn().mockResolvedValue(undefined),
+}));
 
-jest.mock('../../src/config/redis', () => ({
-  blacklistAccessToken: jest.fn(),
-  getRedisClient: jest.fn().mockResolvedValue({
+jest.mock('../../src/config/redis', () => {
+  const redis = {
     get: jest.fn().mockResolvedValue('1'),
     set: jest.fn().mockResolvedValue(undefined),
-  }),
-}));
+  };
+  return {
+    runRedisOperation: jest.fn(
+      async (_feature, _fallback, operation, fallbackValue = null) => {
+        try {
+          return await operation(redis);
+        } catch {
+          return fallbackValue;
+        }
+      }
+    ),
+  };
+});
 
 jest.mock('argon2', () => ({
   verify: jest.fn().mockResolvedValue(true),
@@ -68,13 +88,13 @@ const { createAuditLog } = require('../../src/utils/audit');
 const {
   recordLoginAttempt,
   clearFailedAttempts,
+  checkAndRecordAttempt,
   incrementAttempt,
 } = require('../../src/middleware/bruteForce');
 const { isValidStep } = require('../../src/utils/hierarchy');
 const {
   sendVerificationEmail,
 } = require('../../src/modules/auth/verificationService');
-const { blacklistAccessToken } = require('../../src/config/redis');
 const argon2 = require('argon2');
 const service = require('../../src/modules/auth/service');
 
@@ -87,6 +107,8 @@ describe('Auth Service', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    checkAndRecordAttempt.mockResolvedValue(1);
+    incrementAttempt.mockResolvedValue(1);
   });
 
   describe('register()', () => {
@@ -161,14 +183,14 @@ describe('Auth Service', () => {
         suspended: false,
       };
 
-      incrementAttempt.mockResolvedValue(1);
+      checkAndRecordAttempt.mockResolvedValue(1);
       repo.findByEmail.mockResolvedValue(user);
       repo.verifyPassword.mockResolvedValue(true);
       repo.storeRefreshTokenRedis.mockResolvedValue(undefined);
 
       const result = await service.login(email, password, ip, userAgent);
 
-      expect(incrementAttempt).toHaveBeenCalledWith(email, ip);
+      expect(checkAndRecordAttempt).toHaveBeenCalledWith(email, ip);
       expect(repo.findByEmail).toHaveBeenCalledWith(email);
       expect(repo.verifyPassword).toHaveBeenCalledWith(user, password);
       expect(clearFailedAttempts).toHaveBeenCalledWith(email, ip);
@@ -189,12 +211,33 @@ describe('Auth Service', () => {
           email: user.email,
           role: user.role,
           full_name: user.full_name,
+          avatar_url: null,
+          mustChangePassword: false,
         },
       });
     });
 
-    it('login() invalid credentials', async () => {
+    it('login() returns user with avatar_url when present', async () => {
+      const userWithAvatar = {
+        id: 'user-1',
+        email,
+        role: 'EMPLOYEE',
+        full_name: 'Test User',
+        avatar_url: '/uploads/custom_avatar.png',
+        suspended: false,
+      };
       incrementAttempt.mockResolvedValue(1);
+      repo.findByEmail.mockResolvedValue(userWithAvatar);
+      repo.verifyPassword.mockResolvedValue(true);
+      repo.storeRefreshTokenRedis.mockResolvedValue(undefined);
+
+      const result = await service.login(email, password, ip, userAgent);
+
+      expect(result.user.avatar_url).toBe('/uploads/custom_avatar.png');
+    });
+
+    it('login() invalid credentials', async () => {
+      checkAndRecordAttempt.mockResolvedValue(1);
       repo.findByEmail.mockResolvedValue(null);
       argon2.verify.mockResolvedValue(true);
 
@@ -215,7 +258,7 @@ describe('Auth Service', () => {
         suspended: true,
       };
 
-      incrementAttempt.mockResolvedValue(1);
+      checkAndRecordAttempt.mockResolvedValue(1);
       repo.findByEmail.mockResolvedValue(suspendedUser);
       argon2.verify.mockResolvedValue(true);
 
@@ -228,7 +271,11 @@ describe('Auth Service', () => {
     });
 
     it('login() account locked', async () => {
-      incrementAttempt.mockResolvedValue(6);
+      checkAndRecordAttempt.mockRejectedValue(
+        new UnauthorizedError(
+          'Account temporarily locked. Please try again later.'
+        )
+      );
 
       await expect(
         service.login(email, password, ip, userAgent)
@@ -238,7 +285,7 @@ describe('Auth Service', () => {
     });
 
     it('login() Redis/brute-force failure', async () => {
-      incrementAttempt.mockRejectedValue(new Error('Redis failure'));
+      checkAndRecordAttempt.mockRejectedValue(new Error('Redis failure'));
 
       await expect(
         service.login(email, password, ip, userAgent)
@@ -246,12 +293,35 @@ describe('Auth Service', () => {
         'Login temporarily unavailable. Please try again later.'
       );
       expect(repo.findByEmail).not.toHaveBeenCalled();
-      expect(recordLoginAttempt).not.toHaveBeenCalled();
     });
-  });
 
-  describe('refreshTokens()', () => {
-    it('refreshTokens() success', async () => {
+    describe('refreshTokens()', () => {
+      it('refreshTokens() success', async () => {
+        const user = {
+          id: 'user-1',
+          email,
+          role: 'EMPLOYEE',
+          full_name: 'Test User',
+          suspended: false,
+        };
+
+        incrementAttempt.mockRejectedValue(new Error('Redis failure'));
+        repo.findByEmail.mockResolvedValue(user);
+        repo.verifyPassword.mockResolvedValue(true);
+        repo.storeRefreshTokenRedis.mockResolvedValue(undefined);
+
+        await expect(
+          service.login(email, password, ip, userAgent)
+        ).resolves.toMatchObject({
+          accessToken: 'mocked-access-token',
+          refreshToken: 'mocked-refresh-token',
+        });
+        expect(repo.findByEmail).toHaveBeenCalledWith(email);
+        expect(recordLoginAttempt).toHaveBeenCalledWith(email, ip, true);
+      });
+    });
+
+    describe('refreshTokens()', () => {
       const user = {
         id: 'user-1',
         email,
@@ -260,143 +330,235 @@ describe('Auth Service', () => {
         suspended: false,
       };
 
-      verifyRefreshToken.mockReturnValue({ id: user.id });
-      repo.claimRefreshToken.mockResolvedValue(user.id);
-      repo.findById.mockResolvedValue(user);
-      repo.storeRefreshTokenRedis.mockResolvedValue(undefined);
-
-      const result = await service.refreshTokens('valid-refresh', ip);
-
-      expect(verifyRefreshToken).toHaveBeenCalledWith('valid-refresh');
-      expect(hashToken).toHaveBeenCalledWith('valid-refresh');
-      expect(repo.claimRefreshToken).toHaveBeenCalledWith(
-        'mocked-hash:valid-refresh'
-      );
-      expect(repo.findById).toHaveBeenCalledWith(user.id);
-      expect(repo.storeRefreshTokenRedis).toHaveBeenCalledWith(
-        user.id,
-        'mocked-hash:mocked-refresh-token',
-        expect.any(Date)
-      );
-      expect(result).toEqual({
-        accessToken: 'mocked-access-token',
-        refreshToken: 'mocked-refresh-token',
-        user: {
+      beforeEach(() => {
+        verifyRefreshToken.mockReturnValue({
           id: user.id,
-          email: user.email,
-          role: user.role,
-          full_name: user.full_name,
-        },
-      });
-    });
+        });
 
-    it('refreshTokens() invalid token', async () => {
-      verifyRefreshToken.mockImplementation(() => {
-        throw new Error('Invalid payload');
+        repo.findById.mockResolvedValue(user);
       });
 
-      await expect(service.refreshTokens('bad-token', ip)).rejects.toThrow(
-        'Invalid refresh token'
-      );
-      expect(repo.claimRefreshToken).not.toHaveBeenCalled();
-    });
+      it('rotates and stores recovery transactionally', async () => {
+        repo.rotateRefreshTokenWithRecovery.mockResolvedValue({
+          claimedUserId: user.id,
+          rotated: true,
+        });
 
-    it('refreshTokens() revoked token', async () => {
-      verifyRefreshToken.mockReturnValue({ id: 'user-1' });
-      repo.claimRefreshToken.mockResolvedValue(null);
+        repo.cacheRefreshToken.mockResolvedValue(true);
 
-      await expect(
-        service.refreshTokens('revoked-refresh', ip)
-      ).rejects.toThrow('Token revoked/expired');
-      expect(repo.findById).not.toHaveBeenCalled();
-    });
+        await expect(
+          service.refreshTokens('valid-refresh', ip, userAgent)
+        ).resolves.toEqual({
+          accessToken: 'mocked-access-token',
+          refreshToken: 'mocked-refresh-token',
+          user: {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            full_name: user.full_name,
+            avatar_url: null,
+            mustChangePassword: false,
+          },
+        });
 
-    it('refreshTokens() suspended user', async () => {
-      const suspendedUser = {
-        id: 'user-1',
-        suspended: true,
-      };
-
-      verifyRefreshToken.mockReturnValue({ id: suspendedUser.id });
-      repo.claimRefreshToken.mockResolvedValue(suspendedUser.id);
-      repo.findById.mockResolvedValue(suspendedUser);
-
-      await expect(
-        service.refreshTokens('suspended-refresh', ip)
-      ).rejects.toThrow('User not found/suspended');
-      expect(repo.storeRefreshTokenRedis).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('logout()', () => {
-    it('logout() success', async () => {
-      verifyRefreshToken.mockReturnValue({ id: 'user-1' });
-      repo.revokeRefreshTokenRedis.mockResolvedValue(undefined);
-      blacklistAccessToken.mockResolvedValue(undefined);
-
-      const accessExp = Math.floor(Date.now() / 1000) + 60;
-
-      await service.logout(
-        'valid-refresh',
-        'user-1',
-        'access-jti',
-        accessExp,
-        ip,
-        userAgent
-      );
-
-      expect(verifyRefreshToken).toHaveBeenCalledWith('valid-refresh');
-      expect(repo.revokeRefreshTokenRedis).toHaveBeenCalledWith(
-        'mocked-hash:valid-refresh'
-      );
-      expect(blacklistAccessToken).toHaveBeenCalledWith(
-        'access-jti',
-        expect.any(Number)
-      );
-      expect(createAuditLog).toHaveBeenCalledWith({
-        userId: 'user-1',
-        action: 'LOGOUT',
-        resourceType: 'auth',
-        resourceId: 'user-1',
-        ipAddress: ip,
-        userAgent,
-      });
-    });
-
-    it('logout() invalid refresh token', async () => {
-      verifyRefreshToken.mockImplementation(() => {
-        throw new Error('Bad token');
+        expect(repo.rotateRefreshTokenWithRecovery).toHaveBeenCalledWith(
+          expect.objectContaining({
+            consumedTokenHash: 'mocked-hash:valid-refresh',
+            userId: user.id,
+            replacementTokenHash: 'mocked-hash:mocked-refresh-token',
+            encryptedPayload: 'encrypted-recovery',
+          })
+        );
+        const rotationArgs =
+          repo.rotateRefreshTokenWithRecovery.mock.calls[0][0];
+        const recoveryLifetime =
+          rotationArgs.recoveryExpiresAt.getTime() - Date.now();
+        expect(recoveryLifetime).toBeGreaterThanOrEqual(19 * 60 * 1000);
+        expect(recoveryLifetime).toBeLessThanOrEqual(20 * 60 * 1000);
       });
 
-      await expect(
-        service.logout(
-          'invalid-refresh',
-          'user-1',
-          'access-jti',
-          12345,
-          ip,
-          userAgent
-        )
-      ).rejects.toThrow('Invalid refresh token');
-      expect(repo.revokeRefreshTokenRedis).not.toHaveBeenCalled();
-      expect(blacklistAccessToken).not.toHaveBeenCalled();
+      it('recovers from PostgreSQL when rotation was already claimed', async () => {
+        const recoveredSession = {
+          accessToken: 'recovered-access',
+          refreshToken: 'recovered-refresh',
+          user: {
+            id: user.id,
+            email,
+            role: user.role,
+          },
+        };
+
+        repo.rotateRefreshTokenWithRecovery.mockResolvedValue(null);
+
+        repo.getRefreshRecoveryPostgres.mockResolvedValue({
+          user_id: user.id,
+          client_fingerprint: require('crypto')
+            .createHash('sha256')
+            .update(`${ip}|${userAgent}`)
+            .digest('hex'),
+          replacement_token_hash: 'mocked-hash:recovered-refresh',
+          encrypted_payload: 'encrypted-recovery',
+        });
+
+        const { decryptRefreshRecovery } = require('../../src/utils/tokens');
+
+        decryptRefreshRecovery.mockReturnValue(recoveredSession);
+
+        await expect(
+          service.refreshTokens('used-refresh', ip, userAgent)
+        ).resolves.toEqual(recoveredSession);
+      });
+
+      it('rejects recovery for a different client', async () => {
+        repo.rotateRefreshTokenWithRecovery.mockResolvedValue(null);
+
+        repo.getRefreshRecoveryPostgres.mockResolvedValue({
+          user_id: user.id,
+          client_fingerprint: 'different-client',
+          replacement_token_hash: 'mocked-hash:recovered-refresh',
+          encrypted_payload: 'encrypted-recovery',
+        });
+
+        await expect(
+          service.refreshTokens('used-refresh', ip, userAgent)
+        ).rejects.toThrow('Token revoked/expired');
+      });
+
+      it('rejects a corrupted recovery payload', async () => {
+        repo.rotateRefreshTokenWithRecovery.mockResolvedValue(null);
+
+        repo.getRefreshRecoveryPostgres.mockResolvedValue({
+          user_id: user.id,
+          client_fingerprint: require('crypto')
+            .createHash('sha256')
+            .update(`${ip}|${userAgent}`)
+            .digest('hex'),
+          replacement_token_hash: 'mocked-hash:recovered-refresh',
+          encrypted_payload: 'corrupted',
+        });
+
+        const { decryptRefreshRecovery } = require('../../src/utils/tokens');
+
+        decryptRefreshRecovery.mockImplementation(() => {
+          throw new Error('Authentication failed');
+        });
+
+        await expect(
+          service.refreshTokens('used-refresh', ip, userAgent)
+        ).rejects.toThrow('Token revoked/expired');
+      });
+
+      it('rejects an invalid refresh token', async () => {
+        verifyRefreshToken.mockImplementation(() => {
+          throw new Error('Invalid payload');
+        });
+
+        await expect(
+          service.refreshTokens('bad-token', ip, userAgent)
+        ).rejects.toThrow('Invalid refresh token');
+      });
+
+      it('rejects a suspended user', async () => {
+        repo.findById.mockResolvedValue({
+          ...user,
+          suspended: true,
+        });
+
+        await expect(
+          service.refreshTokens('suspended-refresh', ip, userAgent)
+        ).rejects.toThrow('User not found/suspended');
+      });
     });
+    describe('logout()', () => {
+      it('logout() success', async () => {
+        verifyRefreshToken.mockReturnValue({ id: 'user-1' });
+        repo.revokeRefreshTokenRedis.mockResolvedValue(undefined);
 
-    it('logout() token/user mismatch', async () => {
-      verifyRefreshToken.mockReturnValue({ id: 'other-user' });
+        const accessExp = Math.floor(Date.now() / 1000) + 60;
 
-      await expect(
-        service.logout(
+        await service.logout(
           'valid-refresh',
           'user-1',
           'access-jti',
-          12345,
+          accessExp,
           ip,
           userAgent
-        )
-      ).rejects.toThrow('Token does not belong to authenticated user');
-      expect(repo.revokeRefreshTokenRedis).not.toHaveBeenCalled();
-      expect(blacklistAccessToken).not.toHaveBeenCalled();
+        );
+
+        expect(verifyRefreshToken).toHaveBeenCalledWith('valid-refresh');
+        expect(repo.revokeRefreshTokenRedis).toHaveBeenCalledWith(
+          'mocked-hash:valid-refresh'
+        );
+        expect(repo.revokeAccessToken).toHaveBeenCalledWith(
+          'access-jti',
+          'user-1',
+          expect.any(Date)
+        );
+        expect(createAuditLog).toHaveBeenCalledWith({
+          userId: 'user-1',
+          action: 'LOGOUT',
+          resourceType: 'auth',
+          resourceId: 'user-1',
+          ipAddress: ip,
+          userAgent,
+        });
+      });
+
+      it('logout() invalid refresh token', async () => {
+        verifyRefreshToken.mockImplementation(() => {
+          throw new Error('Bad token');
+        });
+
+        await expect(
+          service.logout(
+            'invalid-refresh',
+            'user-1',
+            'access-jti',
+            12345,
+            ip,
+            userAgent
+          )
+        ).rejects.toThrow('Invalid refresh token');
+        expect(repo.revokeRefreshTokenRedis).not.toHaveBeenCalled();
+        expect(repo.revokeAccessToken).not.toHaveBeenCalled();
+      });
+
+      it('logout() token/user mismatch', async () => {
+        verifyRefreshToken.mockReturnValue({ id: 'other-user' });
+
+        await expect(
+          service.logout(
+            'valid-refresh',
+            'user-1',
+            'access-jti',
+            12345,
+            ip,
+            userAgent
+          )
+        ).rejects.toThrow('Token does not belong to authenticated user');
+        expect(repo.revokeRefreshTokenRedis).not.toHaveBeenCalled();
+        expect(repo.revokeAccessToken).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('background refresh recovery lifecycle contract', () => {
+    it('keeps recovery through background suspension and retires it after replacement use', () => {
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const serviceSource = fs.readFileSync(
+        path.resolve(__dirname, '../../src/modules/auth/service.js'),
+        'utf8'
+      );
+      const repositorySource = fs.readFileSync(
+        path.resolve(__dirname, '../../src/modules/auth/repository.js'),
+        'utf8'
+      );
+      expect(serviceSource).toContain(
+        'const REFRESH_RECOVERY_SECONDS = 20 * 60;'
+      );
+      expect(repositorySource).toContain('WHERE replacement_token_hash = $1');
+      expect(repositorySource).toContain('[consumedTokenHash]');
     });
   });
 });

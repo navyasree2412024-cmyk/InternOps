@@ -72,6 +72,7 @@ function authHeaders(extra) {
   return {
     'X-CSRF-Token': csrfToken,
     'Content-Type': 'application/json',
+    Origin: 'http://localhost:5173',
     ...extra,
   };
 }
@@ -100,6 +101,21 @@ async function login(
 }
 
 describe('Auth Integration Tests', () => {
+  it('keeps session bootstrap routes on dedicated rate-limit budgets', () => {
+    const routesSource = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../../src/modules/auth/routes.js'),
+      'utf8'
+    );
+    const configSource = require('fs').readFileSync(
+      require('path').resolve(__dirname, '../../src/config/index.js'),
+      'utf8'
+    );
+    expect(routesSource).toContain('max: config.rateLimit.refreshMax');
+    expect(routesSource).toContain('max: config.rateLimit.csrfMax');
+    expect(configSource).toContain('RATE_LIMIT_REFRESH_MAX');
+    expect(configSource).toContain('RATE_LIMIT_CSRF_MAX');
+  });
+
   describe('POST /api/auth/login', () => {
     it('should login with valid credentials', async () => {
       const res = await login();
@@ -262,8 +278,7 @@ describe('Auth Integration Tests', () => {
   });
 
   describe('CSRF Protection', () => {
-    it('should reject POST without CSRF header', async () => {
-      // No csrf-token cookie and no X-CSRF-Token header — must 403.
+    it('should allow POST with bearer auth even without a CSRF header', async () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/v1/departments',
@@ -271,7 +286,18 @@ describe('Auth Integration Tests', () => {
           Authorization: `Bearer ${freshAccessToken}`,
           'Content-Type': 'application/json',
         },
-        payload: { name: 'Test' },
+        payload: { name: 'TestBearer_' + Date.now() },
+      });
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('should reject POST when origin is not in the trusted allow-list', async () => {
+      const res = await inject('POST', '/api/v1/departments', {
+        headers: {
+          Authorization: `Bearer ${freshAccessToken}`,
+          Origin: 'https://evil.example',
+        },
+        payload: { name: 'TestDept_' + Date.now() },
       });
       expect(res.statusCode).toBe(403);
     });
@@ -490,7 +516,7 @@ describe('Auth Integration Tests', () => {
       });
       expect(okLogin.statusCode).toBe(200);
 
-      // Attacker's 5th attempt from IP 1.1.1.1 must fail with 401 (not locked yet, but count becomes 5)
+      // Attacker's 5th attempt from IP 1.1.1.1 must fail with 429 Lockout (count reaches MAX_ATTEMPTS = 5)
       const fifthRes = await app.inject({
         method: 'POST',
         url: '/api/v1/auth/login',
@@ -498,18 +524,8 @@ describe('Auth Integration Tests', () => {
         headers: { 'x-test-brute': 'true', 'Content-Type': 'application/json' },
         payload: { email: SEEDED_ADMIN_EMAIL, password: 'wrong' },
       });
-      expect(fifthRes.statusCode).toBe(401);
-
-      // Attacker's 6th attempt from IP 1.1.1.1 must fail with 429 Lockout
-      const lockedRes = await app.inject({
-        method: 'POST',
-        url: '/api/v1/auth/login',
-        remoteAddress: '1.1.1.1',
-        headers: { 'x-test-brute': 'true', 'Content-Type': 'application/json' },
-        payload: { email: SEEDED_ADMIN_EMAIL, password: 'wrong' },
-      });
-      expect(lockedRes.statusCode).toBe(429);
-      expect(JSON.parse(lockedRes.body).error).toContain('locked');
+      expect(fifthRes.statusCode).toBe(429);
+      expect(JSON.parse(fifthRes.body).error).toContain('locked');
     });
 
     it('should rotate CSRF session on login and reject token bound to another user', async () => {
@@ -694,8 +710,8 @@ describe('Auth Integration Tests', () => {
 
   describe('Compound Vulnerability Fixes (Layers 1, 2, and 3)', () => {
     it('should lock out an account only per-IP-and-email (Layer 1)', async () => {
-      // 1. Make 5 failed attempts from 127.0.0.1 (remoteAddress: 127.0.0.1)
-      for (let i = 0; i < 5; i++) {
+      // 1. Make 4 failed attempts from 127.0.0.1 (remoteAddress: 127.0.0.1)
+      for (let i = 0; i < 4; i++) {
         await app.inject({
           method: 'POST',
           url: '/api/v1/auth/login',
@@ -704,7 +720,7 @@ describe('Auth Integration Tests', () => {
         });
       }
 
-      // 2. 6th attempt from 127.0.0.1 should be locked (429)
+      // 2. 5th attempt from 127.0.0.1 should be locked (429) as attempt count reaches MAX_ATTEMPTS = 5
       const lockedRes = await app.inject({
         method: 'POST',
         url: '/api/v1/auth/login',

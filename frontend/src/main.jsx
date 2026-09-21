@@ -1,3 +1,9 @@
+import { initSentry } from './lib/sentry';
+
+initSentry().catch((error) => {
+  console.error('[sentry] initialization failed', error);
+});
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';

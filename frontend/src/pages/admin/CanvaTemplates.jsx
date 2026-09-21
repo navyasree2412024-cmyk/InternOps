@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   ExternalLink,
@@ -9,6 +10,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { PageHeader, Card, Badge, Spinner } from '../../components/ui';
+import { useRouteInitialLoading } from '../../components/loading/RouteInitialLoading';
 import {
   useCanvaStatus,
   useCanvaAuthUrl,
@@ -21,10 +23,28 @@ import {
   useDeleteTemplate,
   useSeedTemplates,
 } from '../../hooks/useCertificates';
-import useBodyScrollLock from '../../hooks/useBodyScrollLock';
 
-export default function CanvaTemplates() {
+function colorsFor(template) {
+  return template.colorScheme || template.template_data?.colorScheme;
+}
+
+function CanvaTemplates() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  useEffect(() => {
+    const success = searchParams.get('success');
+    const error = searchParams.get('error');
+
+    if (success === 'true') {
+      alert('Canva connected successfully!');
+      setSearchParams({});
+    }
+
+    if (error) {
+      alert(`Canva connection failed: ${error}`);
+      setSearchParams({});
+    }
+  }, [searchParams, setSearchParams]);
   const [newTemplate, setNewTemplate] = useState({
     name: '',
     description: '',
@@ -38,7 +58,14 @@ export default function CanvaTemplates() {
     return () => document.removeEventListener('keydown', handleKey);
   }, [showCreateModal]);
 
-  useBodyScrollLock(showCreateModal);
+  useEffect(() => {
+    if (!showCreateModal) return;
+    const original = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, [showCreateModal]);
 
   const { data: canvaStatusResp, isLoading: statusLoading } = useCanvaStatus();
   const canvaStatus = canvaStatusResp?.data || {};
@@ -56,6 +83,9 @@ export default function CanvaTemplates() {
     refetch: refetchTemplates,
   } = useTemplates();
   const templates = templatesResp?.data || [];
+  const canvaTemplatesInitialLoading =
+    (statusLoading && !canvaStatusResp) || (templatesLoading && !templatesResp);
+  useRouteInitialLoading(canvaTemplatesInitialLoading);
   const importMutation = useCanvaImport();
   const createMutation = useCreateTemplate();
   const deleteMutation = useDeleteTemplate();
@@ -81,19 +111,7 @@ export default function CanvaTemplates() {
   const handleCreateTemplate = async (e) => {
     e.preventDefault();
     try {
-      const payload = {
-        name: newTemplate.name,
-        description: newTemplate.description,
-        template_data: {
-          background: newTemplate.colorScheme[0] || '#3B82F6',
-          accent: newTemplate.colorScheme[1] || '#10B981',
-          text: newTemplate.colorScheme[2] || '#F59E0B',
-          // If you want to keep the full array for other uses, add:
-          // colors: newTemplate.colorScheme
-        },
-        // thumbnail_url and canva_design_id are not used for manual creation
-      };
-      await createMutation.mutateAsync(payload);
+      await createMutation.mutateAsync(newTemplate);
       setShowCreateModal(false);
       setNewTemplate({
         name: '',
@@ -119,7 +137,7 @@ export default function CanvaTemplates() {
 
   const handleSeedDefaults = async () => {
     try {
-      await seedMutation.mutateAsync();
+      await seedMutation.mutateAsync({});
       refetchTemplates();
     } catch (error) {
       console.error('Failed to seed templates:', error);
@@ -143,18 +161,14 @@ export default function CanvaTemplates() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-      <PageHeader
-        title="Templates & Canva"
-        icon="🎨"
-        description="Manage certificate templates and connect to Canva for design imports"
-      />
+    <div>
+      <PageHeader title="Templates & Canva" icon="🎨" />
 
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="mx-auto max-w-7xl space-y-5">
         {/* Connection Status Card */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+        <Card className="p-5 sm:p-6">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-4">
               <div className="p-3 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl">
                 <Palette className="w-6 h-6 text-white" />
               </div>
@@ -168,30 +182,26 @@ export default function CanvaTemplates() {
               </div>
             </div>
 
-            <div className="flex items-center space-x-4">
-              {statusLoading ? (
-                <Spinner size="sm" />
-              ) : (
-                <Badge color={isConnected ? 'green' : 'red'}>
-                  {isConnected ? (
-                    <span className="flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      Connected
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1">
-                      <X className="w-3 h-3" />
-                      Not Connected
-                    </span>
-                  )}
-                </Badge>
-              )}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Badge variant={isConnected ? 'success' : 'danger'}>
+                {isConnected ? (
+                  <span className="flex items-center gap-1">
+                    <Check className="w-3 h-3" />
+                    Connected
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <X className="w-3 h-3" />
+                    Not Connected
+                  </span>
+                )}
+              </Badge>
 
               {!isConnected && (
                 <button
                   onClick={handleConnectCanva}
                   disabled={!authUrlData?.url}
-                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
+                  className="flex w-full items-center justify-center gap-2 px-4 py-2 sm:w-auto bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
                 >
                   <ExternalLink className="w-4 h-4" />
                   Connect to Canva
@@ -278,8 +288,8 @@ export default function CanvaTemplates() {
         )}
 
         {/* Local Templates Section */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-6">
+        <Card className="p-5 sm:p-6">
+          <div className="mb-5 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                 Local Templates
@@ -288,20 +298,14 @@ export default function CanvaTemplates() {
                 Manage your certificate templates
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
               <button
                 onClick={handleSeedDefaults}
                 disabled={seedMutation.isPending}
-                className="flex items-center gap-2 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
               >
-                {seedMutation.isPending ? (
-                  <Spinner size="sm" />
-                ) : (
-                  <Palette className="w-4 h-4" />
-                )}
-                {seedMutation.isPending
-                  ? 'Seeding Templates...'
-                  : 'Seed Default Templates'}
+                <Palette className="w-4 h-4" />
+                Seed Default Templates
               </button>
               <button
                 onClick={() => setShowCreateModal(true)}
@@ -313,12 +317,8 @@ export default function CanvaTemplates() {
             </div>
           </div>
 
-          {templatesLoading ? (
-            <div className="flex justify-center py-12">
-              <Spinner size="lg" />
-            </div>
-          ) : templates?.length === 0 ? (
-            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+          {templates?.length === 0 ? (
+            <div className="flex min-h-[220px] flex-col items-center justify-center py-8 text-center text-gray-500 dark:text-gray-400">
               <Palette className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>No templates yet. Create one or seed default templates.</p>
             </div>
@@ -351,28 +351,18 @@ export default function CanvaTemplates() {
 
                     {/* Color Scheme Preview */}
                     <div className="flex items-center gap-1">
-                      {(() => {
-                        const colors = template.template_data
-                          ? [
-                              template.template_data.background,
-                              template.template_data.accent,
-                              template.template_data.text,
-                            ].filter(Boolean)
-                          : [];
-                        if (colors.length === 0) return null;
-                        return colors
-                          .slice(0, 5)
-                          .map((color, index) => (
-                            <div
-                              key={index}
-                              className="w-6 h-6 rounded-full border-2 border-white dark:border-gray-900 shadow-sm"
-                              style={{ backgroundColor: color }}
-                            />
-                          ));
-                      })()}
-                      {template.colorScheme?.length > 5 && (
+                      {colorsFor(template)
+                        ?.slice(0, 5)
+                        .map((color, index) => (
+                          <div
+                            key={index}
+                            className="w-6 h-6 rounded-full border-2 border-white dark:border-gray-900 shadow-sm"
+                            style={{ backgroundColor: color }}
+                          />
+                        ))}
+                      {colorsFor(template)?.length > 5 && (
                         <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
-                          +{template.colorScheme.length - 5}
+                          +{colorsFor(template).length - 5}
                         </span>
                       )}
                     </div>
@@ -380,9 +370,8 @@ export default function CanvaTemplates() {
 
                   <div className="px-4 pb-4">
                     <div className="text-xs text-gray-400 dark:text-gray-500">
-                      {template.created_at
-                        ? `Created ${new Date(template.created_at).toLocaleDateString()}`
-                        : 'Recently created'}
+                      Created{' '}
+                      {new Date(template.createdAt).toLocaleDateString()}
                     </div>
                   </div>
                 </div>
@@ -396,14 +385,14 @@ export default function CanvaTemplates() {
       {showCreateModal &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 overflow-y-auto"
+            className="internops-modal-backdrop fixed inset-0 z-50 overflow-y-auto"
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
           >
             <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
               <div
-                className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75 dark:bg-gray-900 dark:bg-opacity-75"
+                className="fixed inset-0 transition-opacity bg-slate-950/60 backdrop-blur-sm"
                 onClick={() => setShowCreateModal(false)}
               />
 
@@ -534,3 +523,5 @@ export default function CanvaTemplates() {
     </div>
   );
 }
+
+export default CanvaTemplates;
