@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Sentiment analysis pipeline for customer feedback (`ai-service/app/sentiment/`): labeled 180-example dataset, text preprocessing with negation handling, TF-IDF + logistic-regression baseline, training/evaluation CLI (`python -m app.sentiment.train`), recorded metrics (`ai-service/reports/sentiment/metrics.json`) and a write-up in `docs/SENTIMENT_ANALYSIS.md`. `scikit-learn` added to the ai-service dev dependencies only.
 - API versioning infrastructure: all business routes are now namespaced under `/api/v1/` (`app.js`).
 - `src/routes.v2.js` skeleton for future breaking changes — registered at `/api/v2/` alongside the stable v1 router.
 - `Deprecation`, `Sunset`, and `Link` response headers on all v1 routes when `V1_DEPRECATED=true` env var is set (`src/routes.js`).

@@ -26,3 +26,16 @@ The Node.js backend (`backend/`) will call this service via REST API.
 ## Reference
 
 Existing AI implementations live in `reference/` — port the logic to Python.
+
+## Sentiment analysis pipeline
+
+Offline pipeline that classifies customer feedback as positive, neutral or negative (dataset,
+preprocessing, TF-IDF + logistic-regression baseline, metrics). It needs the dev dependency group
+(`uv sync`) and is not imported by the API.
+
+```powershell
+uv run python -m app.sentiment.train
+uv run pytest tests -k sentiment
+```
+
+Details and results: [`docs/SENTIMENT_ANALYSIS.md`](../docs/SENTIMENT_ANALYSIS.md).

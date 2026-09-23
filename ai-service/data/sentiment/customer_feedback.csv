@@ -1,0 +1,181 @@
+id,text,label,source
+r001,Absolutely love this blender. It crushes ice in seconds and is easy to clean.,positive,product_review
+r002,The headphones sound fantastic and the battery lasts all week. Worth every penny.,positive,product_review
+r003,"Excellent build quality, feels premium for the price. Would happily buy again.",positive,product_review
+r004,Setup took two minutes and it has worked flawlessly since. Highly recommend!,positive,product_review
+r005,Best laptop bag I've owned. Plenty of pockets and the zips feel sturdy.,positive,product_review
+r006,Bought this as a gift and the recipient was thrilled. Beautiful finish and great packaging.,positive,product_review
+r007,"The camera quality is stunning in low light, far better than my old phone.",positive,product_review
+r008,"Very comfortable chair, I can work for hours without getting fidgety.",positive,product_review
+r009,Great value. Does everything the expensive brands do at half the price.,positive,product_review
+r010,"Sturdy, quiet and powerful. The vacuum picks up pet hair like a dream.",positive,product_review
+r011,I was skeptical but this kettle boils fast and looks great on the counter. Five stars.,positive,product_review
+r012,"Exceeded my expectations. Bright display, smooth performance and a fantastic speaker.",positive,product_review
+r013,The blender arrived in a standard box with a user manual and a spare blade.,neutral,product_review
+r014,"It works as described. Nothing special, nothing wrong.",neutral,product_review
+r015,"Average headphones. Sound is okay for the price, but I wouldn't say they stand out.",neutral,product_review
+r016,"Good screen but the battery life is disappointing, so it evens out for me.",neutral,product_review
+r017,Delivered on Thursday. I haven't had a chance to use it much yet.,neutral,product_review
+r018,The bag is available in black and grey. I ordered the grey one in medium.,neutral,product_review
+r019,Does the job for basic tasks. I expected a little more but it is fine.,neutral,product_review
+r020,"Sturdy enough, though the color is slightly different from the photos. Overall it's acceptable.",neutral,product_review
+r021,It's a kettle. It boils water and switches off automatically.,neutral,product_review
+r022,Setup instructions were clear but the app is clunky. I'd call it mediocre overall.,neutral,product_review
+r023,I bought this to replace my old one. Too early to say whether it lasts.,neutral,product_review
+r024,"Comfortable for short sessions but the armrests are too low, so mixed feelings.",neutral,product_review
+r025,Stopped working after two weeks. Complete waste of money.,negative,product_review
+r026,The battery drains in under three hours and the charger gets dangerously hot. Very disappointed.,negative,product_review
+r027,Cheap plastic that cracked the first time I dropped it. Would not recommend.,negative,product_review
+r028,"Terrible sound quality, constant static, and the left earbud died within a month.",negative,product_review
+r029,The description promised waterproof but it leaked on the first rainy day. Misleading.,negative,product_review
+r030,"Flimsy, overpriced, and nothing like the pictures. Returning it immediately.",negative,product_review
+r031,Instructions are useless and the app never connects to the device. Total headache.,negative,product_review
+r032,The zipper broke on day three and customer service ignored my emails.,negative,product_review
+r033,"Awful. It's loud, it overheats, and it smells like burning plastic when it runs.",negative,product_review
+r034,I regret buying this. The screen has dead pixels and the seller refuses a refund.,negative,product_review
+r035,Doesn't fit as advertised and the material feels rough and cheap. Not happy at all.,negative,product_review
+r036,Worst purchase this year. It jammed twice on the first day and now won't turn on.,negative,product_review
+r037,Clean interface and it syncs across all my devices instantly. Love it!,positive,app_store
+r038,This app saved me hours every week. The new dashboard is brilliant.,positive,app_store
+r039,"Super smooth, no crashes since the latest update. Thanks to the developers.",positive,app_store
+r040,"Finally an app that does exactly what it says. Simple, fast and reliable.",positive,app_store
+r041,Dark mode looks gorgeous and notifications are actually useful. Great work.,positive,app_store
+r042,Easy to onboard my whole team. Everyone picked it up on the first day.,positive,app_store
+r043,The search feature is incredibly quick and accurate. Best update yet.,positive,app_store
+r044,"Really impressed with the offline mode, it works perfectly on my commute.",positive,app_store
+r045,"Five stars. Intuitive, well designed and the support team replied within an hour.",positive,app_store
+r046,Been using it daily for a year and it just keeps getting better.,positive,app_store
+r047,"Love the widgets, they're beautiful and save me so many taps.",positive,app_store
+r048,"Fantastic app for tracking tasks. Clear, fast, and free of annoying ads.",positive,app_store
+r049,Updated to version 4.2 today. The settings menu moved to the top right.,neutral,app_store
+r050,"It's fine for basic use. Not many features, but it opens quickly.",neutral,app_store
+r051,"Nice idea but it needs more polish, so I'm sitting on three stars.",neutral,app_store
+r052,The app works on my tablet but the layout looks stretched. Otherwise it's okay.,neutral,app_store
+r053,I use it mainly for reminders. It has a free tier and a paid tier.,neutral,app_store
+r054,Does what it says. I haven't found anything to love or hate yet.,neutral,app_store
+r055,"Some features are great, others are half finished. Waiting to see where it goes.",neutral,app_store
+r056,Installed it yesterday and still exploring. The interface has a lot of options.,neutral,app_store
+r057,"Login works, sync is a bit slow, and the design is average.",neutral,app_store
+r058,It's okay. Similar to other apps I've tried in this category.,neutral,app_store
+r059,"The latest update changed the icon and fixed a few minor bugs, according to the notes.",neutral,app_store
+r060,"Decent but pricey for what it offers, so I'm undecided about renewing.",neutral,app_store
+r061,Crashes every time I open the camera. Unusable since the last update.,negative,app_store
+r062,Constant login errors and it logged me out three times today. So frustrating.,negative,app_store
+r063,Too many ads and the free version is basically useless. Uninstalling.,negative,app_store
+r064,The new design is confusing and slow. Please bring back the old version.,negative,app_store
+r065,"Battery drain is terrible, it keeps running in the background all day.",negative,app_store
+r066,Lost all my saved data after updating. Absolutely unacceptable.,negative,app_store
+r067,Notifications never arrive on time and sync fails constantly. Do not trust this app.,negative,app_store
+r068,Support just sends copy-paste replies and never fixes anything. Very poor.,negative,app_store
+r069,Charged me twice for the subscription and I can't reach anyone. Scam.,negative,app_store
+r070,It freezes on the loading screen and I can't do anything. Horrible experience.,negative,app_store
+r071,"Bloated, buggy and slow on my phone. I expected much better from this company.",negative,app_store
+r072,"The app keeps asking for permissions it doesn't need. Feels shady, deleted.",negative,app_store
+r073,Priya from support solved my billing issue in five minutes. Thank you so much!,positive,support_ticket
+r074,"Very helpful and polite agent, she walked me through the whole setup patiently.",positive,support_ticket
+r075,My problem was fixed on the first call. Impressive service.,positive,support_ticket
+r076,"Quick response, clear explanation and a genuine apology for the mix-up. Appreciate it.",positive,support_ticket
+r077,The chat support was outstanding. They followed up the next day to make sure everything worked.,positive,support_ticket
+r078,Great experience. The technician arrived on time and repaired it perfectly.,positive,support_ticket
+r079,Refund processed within two days without any fuss. Very satisfied.,positive,support_ticket
+r080,I've never had such friendly and knowledgeable support. You've earned a loyal customer.,positive,support_ticket
+r081,They went above and beyond to recover my account. Exceptional help.,positive,support_ticket
+r082,"Fast, professional and honest. The team clearly cares about customers.",positive,support_ticket
+r083,The knowledge base articles were clear and solved my issue without needing to call.,positive,support_ticket
+r084,"Superb support, they even sent a personal thank-you note after resolving the case.",positive,support_ticket
+r085,I opened a ticket yesterday and received an automated confirmation with a reference number.,neutral,support_ticket
+r086,The agent answered my question but I still need to try the fix myself.,neutral,support_ticket
+r087,"Response took two days which is average, and the solution worked partially.",neutral,support_ticket
+r088,Support asked for my order number and screenshots. I have sent them and am waiting.,neutral,support_ticket
+r089,The call lasted about ten minutes. They transferred me once.,neutral,support_ticket
+r090,"Polite agent but the issue is only half resolved, so I can't say I'm satisfied or upset.",neutral,support_ticket
+r091,Chat support is open on weekdays from 9 to 6. I contacted them about changing my address.,neutral,support_ticket
+r092,They fixed the login problem but couldn't explain what caused it. Fair enough.,neutral,support_ticket
+r093,Email support replied with a link to the FAQ. It was somewhat useful.,neutral,support_ticket
+r094,Ticket is still open. I'll update this after they get back to me.,neutral,support_ticket
+r095,"Service was okay. Not the best, not the worst.",neutral,support_ticket
+r096,I was asked to restart the device and update the firmware. That's all I know so far.,neutral,support_ticket
+r097,I have waited nine days for a reply and nobody has contacted me. Unacceptable.,negative,support_ticket
+r098,The agent was rude and hung up on me when I asked to escalate.,negative,support_ticket
+r099,Three different people gave me three different answers. Nothing was resolved.,negative,support_ticket
+r100,Still no refund after four weeks and countless emails. Terrible service.,negative,support_ticket
+r101,The chatbot loops endlessly and there is no way to reach a human. Extremely frustrating.,negative,support_ticket
+r102,They closed my ticket without fixing anything and marked it as resolved. Ridiculous.,negative,support_ticket
+r103,"Long hold times, dropped calls and no callback. I'm very disappointed.",negative,support_ticket
+r104,The technician never showed up and no one told me. Wasted my whole day.,negative,support_ticket
+r105,Support blamed me for the bug and refused to look into it. Awful attitude.,negative,support_ticket
+r106,I was promised a call back within 24 hours. It has been a week. Very poor communication.,negative,support_ticket
+r107,Worst customer care I have dealt with. They don't listen and don't care.,negative,support_ticket
+r108,My complaint was ignored twice. I am cancelling my account because of this.,negative,support_ticket
+r109,Arrived a day early and the packaging was excellent. Nothing was damaged.,positive,delivery
+r110,The delivery driver was courteous and even called ahead. Great service.,positive,delivery
+r111,"Super fast shipping, my order came in just two days. Very happy!",positive,delivery
+r112,"Neatly wrapped and perfectly intact, exactly as pictured. Thank you.",positive,delivery
+r113,Tracking was accurate and the parcel was left safely at my door. No complaints at all.,positive,delivery
+r114,Impressive speed. Ordered in the morning and it arrived by evening.,positive,delivery
+r115,Careful packing kept the glass items intact. Really appreciate the effort.,positive,delivery
+r116,The courier rescheduled at my request without any hassle. Wonderful.,positive,delivery
+r117,Delivered on time with a handwritten note. Lovely touch.,positive,delivery
+r118,"Everything was fresh and well packed, and the delivery person was friendly.",positive,delivery
+r119,Smooth process from checkout to doorstep. I'll definitely order again.,positive,delivery
+r120,Free shipping and it still arrived earlier than promised. Great deal.,positive,delivery
+r121,Package arrived on Wednesday in a brown cardboard box.,neutral,delivery
+r122,"Delivery took five days, which is what the website estimated.",neutral,delivery
+r123,The parcel was left with my neighbour. I collected it in the evening.,neutral,delivery
+r124,"Shipping was a bit slow but the packaging was good, so it balances out.",neutral,delivery
+r125,I received a tracking number by email and the order shipped from a warehouse in Pune.,neutral,delivery
+r126,Order came in two separate boxes on different days.,neutral,delivery
+r127,Arrived on time but the box had a small dent. The item itself looks fine.,neutral,delivery
+r128,The courier called once and delivered between 2 and 4 pm.,neutral,delivery
+r129,"Standard delivery, nothing to complain about and nothing to praise.",neutral,delivery
+r130,It took a week. I'm not sure whether that's fast or slow for this seller.,neutral,delivery
+r131,"Delivery was quick, but I had to pay extra customs fees. Mixed feelings.",neutral,delivery
+r132,Delivered to the reception desk. I picked it up the next morning.,neutral,delivery
+r133,Package arrived two weeks late and the box was crushed. Very disappointed.,negative,delivery
+r134,The courier marked it as delivered but I never received anything. Terrible.,negative,delivery
+r135,Item was damaged in transit and the seller blames the carrier. Nobody takes responsibility.,negative,delivery
+r136,Delivery was delayed three times with no explanation. Awful experience.,negative,delivery
+r137,The driver left my parcel in the rain and the contents are soaked. Unacceptable.,negative,delivery
+r138,"Wrong item delivered, and returning it is a nightmare.",negative,delivery
+r139,Tracking hasn't updated in ten days. No one can tell me where my order is.,negative,delivery
+r140,Packaging was almost non-existent and everything arrived broken. Horrible.,negative,delivery
+r141,Shipping costs more than the product and it still took forever. Not worth it.,negative,delivery
+r142,The delivery agent was rude and refused to bring it to my floor. Never again.,negative,delivery
+r143,Missing items from my order and no apology. I'm extremely unhappy.,negative,delivery
+r144,They cancelled my order after a week of waiting. Absolutely useless.,negative,delivery
+r145,The food was delicious and the staff made us feel so welcome. We'll be back!,positive,restaurant
+r146,"Best biryani in town, perfectly spiced and generous portions.",positive,restaurant
+r147,"Cozy atmosphere, attentive service and a dessert menu to die for.",positive,restaurant
+r148,Everything we ordered was fresh and beautifully presented. A real gem.,positive,restaurant
+r149,Lovely evening. The waiter recommended a fantastic dish and it was spot on.,positive,restaurant
+r150,Great value for money and the coffee is superb.,positive,restaurant
+r151,Amazing brunch! The pancakes were fluffy and the service was quick.,positive,restaurant
+r152,"Clean, friendly, and the flavors were incredible. Highly recommended.",positive,restaurant
+r153,The chef came out to check on us. Wonderful hospitality and outstanding food.,positive,restaurant
+r154,Perfectly cooked steak and a lovely wine list. Special occasion done right.,positive,restaurant
+r155,"Kid-friendly, tasty and very reasonably priced. Our new family favourite.",positive,restaurant
+r156,"Great music, great cocktails and even better pizza. We had a blast.",positive,restaurant
+r157,We went on Saturday at 8 pm. The place was about half full.,neutral,restaurant
+r158,"Food was decent, nothing memorable. Service was average.",neutral,restaurant
+r159,The menu has a lot of vegetarian options and the prices are mid-range.,neutral,restaurant
+r160,"Tasty starters but the main course was underwhelming, so overall an average night.",neutral,restaurant
+r161,It's a small cafe near the station with about ten tables.,neutral,restaurant
+r162,Food came quickly but was only lukewarm. Staff were polite though.,neutral,restaurant
+r163,I ordered the pasta and my friend had the salad. Both were okay.,neutral,restaurant
+r164,"Nice ambience but a bit loud, and the food was just fine.",neutral,restaurant
+r165,They open at noon and close at eleven. Payment is by card only.,neutral,restaurant
+r166,"Portions were generous, though the flavor was ordinary. I might try it again.",neutral,restaurant
+r167,"Service was slow but friendly, and the food was pretty good. I'd say it's average.",neutral,restaurant
+r168,The dessert was excellent but the main dish was bland. Split verdict.,neutral,restaurant
+r169,"Cold food, slow service and a rude waiter. Never coming back.",negative,restaurant
+r170,The soup was bland and the fish smelled off. Very disappointing meal.,negative,restaurant
+r171,We waited over an hour for our starters and nobody apologised.,negative,restaurant
+r172,Overpriced and tiny portions. Left hungry and irritated.,negative,restaurant
+r173,The table was dirty and the bathroom was disgusting. Awful hygiene.,negative,restaurant
+r174,Got the wrong order twice and the manager didn't care. Terrible.,negative,restaurant
+r175,The noise was unbearable and the pasta was overcooked and greasy.,negative,restaurant
+r176,Found a hair in my salad and they still charged me full price. Unacceptable.,negative,restaurant
+r177,Staff ignored us for twenty minutes then got our bill wrong. Horrible experience.,negative,restaurant
+r178,"Stale bread, lukewarm coffee and a musty smell in the dining room. Avoid.",negative,restaurant
+r179,The most disappointing dinner I've had. Flavorless food and a rude host.,negative,restaurant
+r180,Our reservation was lost and they made us stand outside for an hour. Poor management.,negative,restaurant

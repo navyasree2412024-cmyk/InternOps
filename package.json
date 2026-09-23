@@ -14,6 +14,7 @@
   "scripts": {
     "test": "npm run test --workspace=backend",
     "dev": "concurrently \"npm run dev --workspace=frontend\" \"npm run dev --workspace=backend\" \"cd ai-service && uv run uvicorn app.main:app --reload\"",
+    "dev:app": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
     "lint": "npm run lint --workspaces --if-present",
     "format": "prettier --write .",
     "clean": "rimraf node_modules && npm run clean --workspaces --if-present",

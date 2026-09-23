@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Target,
@@ -15,6 +16,14 @@ import {
   X,
   Trash2,
   Pencil,
+  Eye,
+  Building2,
+  GitPullRequest as GithubIcon,
+  Sparkles,
+  AlertTriangle,
+  BarChart3,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import api from '../lib/axios';
 import { uploadFilesInChunks } from '../lib/chunkedUpload';
@@ -29,6 +38,8 @@ const PLATFORM_ICON = {
   Facebook: <ThumbsUp className="w-5 h-5" />,
   YouTube: <PlaySquare className="w-5 h-5" />,
 };
+
+const ITEMS_PER_PAGE = 20;
 
 const overdue = (d) => new Date(d) < new Date();
 
@@ -322,7 +333,16 @@ export default function Tasks({ isProjectView = false, roster = [] } = {}) {
   const [selectedProofTaskId, setSelectedProofTaskId] = useState(null);
   const [notification, setNotification] = useState(null);
   const [uploadProgress, setUploadProgress] = useState({});
-  const [draftFiles, setDraftFiles] = useState({
+  const [filterDeptId, setFilterDeptId] = useState(deptId || '');
+  const [page, setPage] = useState(1);
+
+  const activeDeptId = deptId || filterDeptId;
+
+  useEffect(() => {
+    if (deptId) setFilterDeptId(deptId);
+    setPage(1);
+  }, [deptId, filterDeptId]);
+  iles, setDraftFiles] = useState({
     taskId: null,
     files: [],
     previews: [],
@@ -364,7 +384,32 @@ export default function Tasks({ isProjectView = false, roster = [] } = {}) {
   });
 
   const tasks = data?.tasks ?? [];
-  const totalPages = data?.totalPages ?? 1;
+
+  const hasCachedTasks = Array.isArray(tasks) && tasks.length > 0;
+  const departmentTasksInitialLoading =
+    !!deptId &&
+    !tasksIsError &&
+    ((isAdmin && departmentsLoading && !activeDepartment) ||
+      (!hasCachedTasks && !isFetchedAfterMount));
+
+  useRouteInitialLoading(
+    !tasksIsError &&
+      (!hydrated ||
+        !accessToken ||
+        isLoading ||
+        !tasks ||
+        departmentTasksInitialLoading)
+  );
+
+  const totalTasks = Array.isArray(tasks) ? tasks.length : 0;
+  const totalPages = Math.ceil(totalTasks / ITEMS_PER_PAGE) || 1;
+  const safePage = Math.min(Math.max(1, page), totalPages);
+
+  const paginatedTasks = useMemo(() => {
+    if (!Array.isArray(tasks)) return [];
+    const start = (safePage - 1) * ITEMS_PER_PAGE;
+    return tasks.slice(start, start + ITEMS_PER_PAGE);
+  }, [tasks, safePage]);
   const { data: proofs, refetch: refetchProofs } = useQuery({
     queryKey: ['proofs', selectedProofTaskId],
     queryFn: () =>
@@ -630,7 +675,7 @@ export default function Tasks({ isProjectView = false, roster = [] } = {}) {
       ) : (
         <>
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            {tasks.map((t) => {
+            {paginatedTasks.map((t) => {
               const isOverdue = t.deadline && overdue(t.deadline);
 
               return (
@@ -1162,28 +1207,39 @@ export default function Tasks({ isProjectView = false, roster = [] } = {}) {
             })}
           </div>
 
-          <div className="flex justify-center items-center gap-4 mt-8">
-            <Btn
-              variant="outline"
-              disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              Previous
-            </Btn>
-
-            <span className="text-sm font-medium">
-              Page {page} of {totalPages}
-            </span>
-
-            <Btn
-              variant="outline"
-              disabled={page === totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </Btn>
-          </div>
-        </>
+          {totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-8 pt-4 border-t border-slate-200 dark:border-slate-800">
+              <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
+                Showing {(safePage - 1) * ITEMS_PER_PAGE + 1} to{' '}
+                {Math.min(safePage * ITEMS_PER_PAGE, totalTasks)} of{' '}
+                {totalTasks} tasks
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Previous page"
+                  className="flex items-center gap-1 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="w-4 h-4" /> Prev
+                </button>
+                <div className="px-4 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-sm font-extrabold border border-indigo-100 dark:border-indigo-900/60">
+                  Page {safePage} of {totalPages}
+                </div>
+                <button
+                  type="button"
+                  aria-label="Next page"
+                  className="flex items-center gap-1 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </ErrorBoundary>
       )}
     </div>
   );

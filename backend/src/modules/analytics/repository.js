@@ -1,4 +1,4 @@
-﻿const pool = require('../../config/db');
+const pool = require('../../config/db');
 
 async function departmentAttendanceRate(
   departmentId,
@@ -24,7 +24,9 @@ async function departmentAttendanceRate(
       COUNT(a.id) FILTER (WHERE a.status='PRESENT') as present,
       COUNT(a.id) FILTER (WHERE a.status='ABSENT') as absent,
       COUNT(a.id) FILTER (WHERE a.status='HALF_DAY') as half_day,
-      COUNT(a.id) as total_marked
+      COUNT(a.id) as total_marked,
+      COALESCE(SUM(a.working_minutes), 0)::int as total_working_minutes,
+      COALESCE(SUM(a.working_seconds), 0)::int as total_working_seconds
     FROM users u
     LEFT JOIN attendance a ON u.id = a.user_id
       AND a.date >= $2
@@ -114,7 +116,7 @@ async function getWorkspace({ from, to, departmentId = null }) {
       departmentParams
     ),
     pool.query(
-      `SELECT COUNT(*) FILTER (WHERE a.status='PRESENT')::int AS present, COUNT(*) FILTER (WHERE a.status='ABSENT')::int AS absent, COUNT(*) FILTER (WHERE a.status='HALF_DAY')::int AS half_day, ROUND(100.0 * (COUNT(*) FILTER (WHERE a.status='PRESENT') + 0.5 * COUNT(*) FILTER (WHERE a.status='HALF_DAY')) / NULLIF(COUNT(*),0),1)::float AS rate FROM attendance a JOIN users u ON u.id=a.user_id WHERE ${datedScope} AND a.deleted_at IS NULL AND a.date BETWEEN $1::date AND $2::date`,
+      `SELECT COUNT(*) FILTER (WHERE a.status='PRESENT')::int AS present, COUNT(*) FILTER (WHERE a.status='ABSENT')::int AS absent, COUNT(*) FILTER (WHERE a.status='HALF_DAY')::int AS half_day, COALESCE(SUM(a.working_minutes), 0)::int AS total_working_minutes, COALESCE(SUM(a.working_seconds), 0)::int AS total_working_seconds, ROUND(100.0 * (COUNT(*) FILTER (WHERE a.status='PRESENT') + 0.5 * COUNT(*) FILTER (WHERE a.status='HALF_DAY')) / NULLIF(COUNT(*),0),1)::float AS rate FROM attendance a JOIN users u ON u.id=a.user_id WHERE ${datedScope} AND a.deleted_at IS NULL AND a.date BETWEEN $1::date AND $2::date`,
       datedParams
     ),
     pool.query(
@@ -142,7 +144,10 @@ async function getWorkspace({ from, to, departmentId = null }) {
         SELECT u.department_id, COUNT(*)::int AS members
         FROM users u WHERE ${datedScope} GROUP BY u.department_id
       ), attendance_stats AS (
-        SELECT u.department_id, ROUND(100.0 * (COUNT(*) FILTER (WHERE a.status='PRESENT') + 0.5 * COUNT(*) FILTER (WHERE a.status='HALF_DAY')) / NULLIF(COUNT(*),0),1)::float AS attendance_rate
+        SELECT u.department_id,
+          ROUND(100.0 * (COUNT(*) FILTER (WHERE a.status='PRESENT') + 0.5 * COUNT(*) FILTER (WHERE a.status='HALF_DAY')) / NULLIF(COUNT(*),0),1)::float AS attendance_rate,
+          COALESCE(SUM(a.working_minutes), 0)::int AS total_working_minutes,
+          COALESCE(SUM(a.working_seconds), 0)::int AS total_working_seconds
         FROM attendance a JOIN users u ON u.id=a.user_id
         WHERE ${datedScope} AND a.deleted_at IS NULL AND a.date BETWEEN $1::date AND $2::date GROUP BY u.department_id
       ), rating_stats AS (
@@ -157,7 +162,7 @@ async function getWorkspace({ from, to, departmentId = null }) {
         SELECT u.department_id, COUNT(DISTINCT ps.id) FILTER (WHERE ps.status='VERIFIED')::int AS verified_proofs
         FROM proof_submissions ps JOIN users u ON u.id=ps.intern_id
         WHERE ps.deleted_at IS NULL AND ps.created_at::date BETWEEN $1::date AND $2::date AND ($3::uuid IS NULL OR u.department_id=$3) GROUP BY u.department_id
-      ) SELECT d.id AS department_id, COALESCE(d.name,'Unassigned') AS department_name, mc.members, COALESCE(a.attendance_rate,0) AS attendance_rate, COALESCE(r.average_rating,0) AS average_rating, COALESCE(t.tasks,0) AS tasks, COALESCE(p.verified_proofs,0) AS verified_proofs
+      ) SELECT d.id AS department_id, COALESCE(d.name,'Unassigned') AS department_name, mc.members, COALESCE(a.attendance_rate,0) AS attendance_rate, COALESCE(a.total_working_minutes, 0) AS total_working_minutes, COALESCE(r.average_rating,0) AS average_rating, COALESCE(t.tasks,0) AS tasks, COALESCE(p.verified_proofs,0) AS verified_proofs
       FROM member_counts mc LEFT JOIN departments d ON d.id=mc.department_id AND d.deleted_at IS NULL LEFT JOIN attendance_stats a ON a.department_id=mc.department_id LEFT JOIN rating_stats r ON r.department_id=mc.department_id LEFT JOIN task_stats t ON t.department_id=mc.department_id LEFT JOIN proof_stats p ON p.department_id=mc.department_id ORDER BY mc.members DESC, department_name`,
       datedParams
     ),

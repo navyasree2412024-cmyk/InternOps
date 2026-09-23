@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -28,13 +28,13 @@ import {
 import useAuthStore from '../store/auth';
 import api from '../lib/axios';
 import { useRouteInitialLoading } from '../components/loading/RouteInitialLoading';
-import {
-  Card,
-  PageHeader,
-  Badge,
-  Stars,
-  ApiErrorState,
-} from '../components/ui';
+import { Card, PageHeader, Badge, ApiErrorState } from '../components/ui';
+
+// Convert whole integer minutes into a clean decimal string during final display rendering
+const formatHours = (minutes) => {
+  if (typeof minutes !== 'number' || isNaN(minutes)) return '0.00';
+  return (minutes / 60).toFixed(2);
+};
 
 // Status styling mapping
 const STATUS_COLORS = {
@@ -182,6 +182,10 @@ export default function InternOps() {
           valA = a.attendancePercentage || 0;
           valB = b.attendancePercentage || 0;
           break;
+        case 'workingHours':
+          valA = a.totalWorkingMinutes || 0;
+          valB = b.totalWorkingMinutes || 0;
+          break;
         case 'rating':
           valA = a.avgRating || 0;
           valB = b.avgRating || 0;
@@ -319,7 +323,7 @@ export default function InternOps() {
                       : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                   }`}
                 >
-                  {state === 'ALL' ? 'All Roles' : state}
+                  {state === 'ALL' ? 'All Statuses' : state}
                 </button>
               )
             )}
@@ -341,10 +345,11 @@ export default function InternOps() {
               <div className="overflow-x-auto">
                 <table className="w-full table-fixed text-sm">
                   <colgroup>
-                    <col className="w-[31%]" />
-                    <col className="w-[25%]" />
-                    <col className="w-[19%]" />
-                    <col className="w-[20%]" />
+                    <col className="w-[28%]" />
+                    <col className="w-[18%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[17%]" />
+                    <col className="w-[16%]" />
                     <col className="w-[5%]" />
                   </colgroup>
                   <thead className="border-b border-slate-200 bg-slate-50/80 font-extrabold text-slate-500 dark:border-slate-700 dark:bg-slate-700/70 dark:text-slate-300 select-none">
@@ -360,7 +365,7 @@ export default function InternOps() {
                       </th>
                       <th
                         onClick={() => handleSort('attendance')}
-                        className="cursor-pointer px-4 py-4 text-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
+                        className="cursor-pointer px-3 py-4 text-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
                       >
                         <div className="flex items-center justify-center gap-1.5 font-bold">
                           Attendance %
@@ -368,8 +373,17 @@ export default function InternOps() {
                         </div>
                       </th>
                       <th
+                        onClick={() => handleSort('workingHours')}
+                        className="cursor-pointer px-3 py-4 text-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
+                      >
+                        <div className="flex items-center justify-center gap-1.5 font-bold">
+                          Working Hours
+                          <ArrowUpDown className="w-3.5 h-3.5 opacity-60" />
+                        </div>
+                      </th>
+                      <th
                         onClick={() => handleSort('rating')}
-                        className="cursor-pointer px-4 py-4 text-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
+                        className="cursor-pointer px-3 py-4 text-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
                       >
                         <div className="flex items-center justify-center gap-1.5 font-bold">
                           Avg Rating
@@ -378,7 +392,7 @@ export default function InternOps() {
                       </th>
                       <th
                         onClick={() => handleSort('status')}
-                        className="cursor-pointer px-4 py-4 text-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
+                        className="cursor-pointer px-3 py-4 text-center transition-colors hover:bg-slate-100 dark:hover:bg-slate-700/60"
                       >
                         <div className="flex items-center justify-center gap-1.5 font-bold">
                           Status
@@ -389,7 +403,7 @@ export default function InternOps() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-850">
-                    {processedInterns.map((i, index) => (
+                    {processedInterns.map((i) => (
                       <tr
                         key={i.id}
                         onClick={() => setSelectedInternId(i.id)}
@@ -407,9 +421,9 @@ export default function InternOps() {
                             {i.email}
                           </div>
                         </td>
-                        <td className="px-4 py-4 text-center">
+                        <td className="px-3 py-4 text-center">
                           <div className="flex items-center justify-center gap-2">
-                            <div className="w-20 bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div className="w-16 bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
                               <div
                                 className={`h-full rounded-full ${
                                   i.attendancePercentage >= 80
@@ -424,17 +438,29 @@ export default function InternOps() {
                             </span>
                           </div>
                         </td>
-                        <td className="px-4 py-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
+                        <td className="px-3 py-4 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <span className="font-extrabold text-indigo-600 dark:text-indigo-400">
+                              {formatHours(i.totalWorkingMinutes)}
+                            </span>
+                            <span className="text-xs text-slate-400 font-medium">
+                              hrs
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
                             <span className="font-extrabold text-amber-500">
-                              {i.avgRating || '—'}
+                              {i.avgRating
+                                ? Number(i.avgRating).toFixed(2)
+                                : '—'}
                             </span>
                             <span className="text-xs text-slate-400 font-medium">
                               ({i.numRatings} ratings)
                             </span>
                           </div>
                         </td>
-                        <td className="px-4 py-4 text-center">
+                        <td className="px-3 py-4 text-center">
                           <div className="flex justify-center">
                             <Badge color={STATUS_COLORS[i.status]}>
                               {i.status}
@@ -486,15 +512,15 @@ export default function InternOps() {
               </div>
 
               {/* Grid Statistics */}
-              <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="grid grid-cols-3 gap-3 mb-6">
                 <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200/50 dark:border-slate-850">
                   <div className="text-[10px] uppercase font-bold text-slate-400">
                     Attendance
                   </div>
-                  <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1">
+                  <div className="text-base sm:text-lg font-black text-indigo-600 dark:text-indigo-400 mt-1">
                     {selectedIntern.attendancePercentage}%
                   </div>
-                  <div className="text-[9px] text-slate-400 mt-0.5">
+                  <div className="text-[9px] text-slate-400 mt-0.5 truncate">
                     {selectedIntern.presentDays} of{' '}
                     {selectedIntern.totalAttendance} checks
                   </div>
@@ -502,10 +528,24 @@ export default function InternOps() {
 
                 <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200/50 dark:border-slate-850">
                   <div className="text-[10px] uppercase font-bold text-slate-400">
+                    Work Hours
+                  </div>
+                  <div className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1">
+                    {formatHours(selectedIntern.totalWorkingMinutes)}h
+                  </div>
+                  <div className="text-[9px] text-slate-400 mt-0.5 truncate">
+                    {selectedIntern.totalWorkingMinutes || 0} mins tracked
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200/50 dark:border-slate-850">
+                  <div className="text-[10px] uppercase font-bold text-slate-400">
                     Avg Rating
                   </div>
-                  <div className="text-lg font-black text-amber-500 mt-1">
-                    {selectedIntern.avgRating || '—'}
+                  <div className="text-base sm:text-lg font-black text-amber-500 mt-1">
+                    {selectedIntern.avgRating
+                      ? Number(selectedIntern.avgRating).toFixed(2)
+                      : '—'}
                   </div>
                   <div className="text-[9px] text-slate-400 mt-0.5 flex items-center gap-1">
                     Trend:
@@ -613,6 +653,11 @@ export default function InternOps() {
                             {att.arrivalTime && (
                               <span className="text-[10px] text-slate-450 dark:text-slate-450 italic mt-0.5">
                                 at {att.arrivalTime.slice(0, 5)}
+                              </span>
+                            )}
+                            {att.workingMinutes !== undefined && (
+                              <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                                {formatHours(att.workingMinutes)} hrs
                               </span>
                             )}
                           </div>

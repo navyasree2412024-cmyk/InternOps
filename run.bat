@@ -1,0 +1,3 @@
+@echo off
+echo Starting InternOps Backend and Frontend concurrently...
+npm run dev:app
